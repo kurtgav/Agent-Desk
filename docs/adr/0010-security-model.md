@@ -19,6 +19,7 @@
   - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
   - No `remote` module. Navigation and `window.open` are denied.
   - CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src http://127.0.0.1:<port>; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`.
+  - *M1 implementation (2026-11-05):* the app:// handler sends the policy as a `Content-Security-Policy` response header (plus `X-Content-Type-Options: nosniff`); `index.html` repeats it as a `<meta>` for the dev server, which can't carry `frame-ancestors`. `font-src` also allows `data:` because Vite inlines small font files. `connect-src` stays `'self'` until the collector exists (M2 adds the loopback origin). Packaged builds remove the default application menu, so the DevTools and Reload accelerators are gone. `tests/shell.spec.ts` checks the header, blocked inline script and `eval`, denied navigation, popups and permissions.
   - Preload exposes `{port, token, os: {openPath, showItemInFolder}}` through `contextBridge`, plus a typed IPC surface validated with zod in main.
 - **Content:** model output and commands render as text. Markdown goes through a sanitizer that allows no raw HTML. Links open only after an explicit click, through `shell.openExternal`, and only for http(s).
 - **Actions:** Approve, Reject, Stop and Dispatch need a renderer session nonce issued per window load. Risky approvals and Stop need a confirm step.
