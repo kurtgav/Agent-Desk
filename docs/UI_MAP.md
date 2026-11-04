@@ -4,30 +4,33 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 
 **Rule: every element maps to real data or a real action. Anything that doesn't is dropped.**
 
-## Layout tokens (starting values, tune against the screenshot in M1)
-- **Grid:** 8 px. Sidebar 232 px, collapsible to 64 px. Content max width 1180 px with 24 px gutters. The right column (Recent files, Your agents) is 300 px and wraps below the main column when the window is under 1280 px.
-- **Surfaces:** app `#F5F5F7`; cards `#FFFFFF` with a 1px `#E7E7EA` border and near-zero shadow (`0 1px 0 rgb(0 0 0 / .02)`); tiles `#F4F4F5`.
-- **Radius:** cards 16, tiles 12, inputs 12, pill buttons 999.
-- **Type:** Inter (bundled), tabular numbers for every count, time and money. Sizes:
+## Layout tokens (tuned in M1 against the reference measured at 1440×924; source of truth is `src/renderer/src/styles.css`)
+- **Grid:** 4/8 px. Sidebar 216 px, collapsible to 64 px. Top bar 48 px. Canvas padding 36 px sides, 24 px top and bottom; content max width 1280 px; card gap 16 px.
+- **Columns:** greeting : composer = 5 : 8 (keeps the summary on one line); KPI row 4 equal cards, 134 px tall; main : right = 2 : 1. Below a 1280 px window the right column wraps under the main one as a 2-column row (`tests/home.spec.ts` checks it at 1200×760).
+- **Row caps:** Needs you 3 (the rest behind "See all (N more)"), Running now 4, Recent files 4, Your agents 6. At 1440×924 Home fits without scrolling; the smoke test fails if it doesn't.
+- **Surfaces:** ground `#F6F6F6`; cards `#FFFFFF` with a 1 px `#EAEAEA` border, no shadow; row rules `#F1F1F2`; tiles `#F6F6F6`; code/well `#F2F2F3`; control borders `#DCDCDF`. Shadows only on floating layers (menus, tooltips, dialog).
+- **Radius:** cards 16, tiles 12, icon tiles 8, pill buttons 999.
+- **Type:** Inter Variable (bundled), tabular numbers for every count, time and money. Sizes:
 
 | Role | Size / weight |
 |---|---|
-| Greeting | 22/600 |
-| Card title | 14/600 |
-| KPI value | 22/600 |
-| Body | 13/400 |
-| Meta | 12/400 in `#71717A` |
+| Greeting | 28/600, −0.02em |
+| KPI value | 28/600 |
+| Card title | 15/600 |
+| Body / row title | 14/400 |
+| Labels, buttons | 13/500 |
+| Meta | 12/400 in `#6B6B72` |
 
-- **Color:** text `#18181B` / `#71717A`; accent `#0A84FF`.
-- **Status:** each pill is a dot plus a label.
+- **Color:** ink `#18181B`, muted `#6B6B72` (≥ 4.5:1 on ground and white). Accent `#0A84FF` for marks, bars and focus rings; filled buttons use `#0071E3` (hover `#0064C8`) because white on `#0A84FF` is only 3.65:1 (D-032).
+- **Status:** each pill is a dot plus a label; label ink is the dark shade so text passes AA on the fill.
 
-| Status | Dot | Pill fill |
-|---|---|---|
-| Working | `#0A84FF` | `#E8F1FF` |
-| Needs you | `#F59E0B` | `#FEF3C7` |
-| Failed | `#EF4444` | `#FEE2E2` |
-| Idle | `#A1A1AA` | `#F4F4F5` |
-| Done | `#22C55E` | `#DCFCE7` |
+| Status | Dot | Pill fill | Label ink |
+|---|---|---|---|
+| Working | `#0A84FF` | `#E6F0FE` | `#0B4FA8` |
+| Needs you | `#F59E0B` | `#FEF3C7` | `#92400E` |
+| Failed | `#EF4444` | `#FEE2E2` | `#991B1B` |
+| Idle | `#A1A1AA` | `#EFEFF1` | `#52525B` |
+| Done | `#22C55E` | `#DCFCE7` | `#166534` |
 
 - **Themes and motion:** tokens are CSS variables, light theme now, with a `[data-theme=dark]` block ready. Motion lasts 120–200 ms ease-out and is disabled under `prefers-reduced-motion`.
 - **Icons:** lucide, 16 px, stroke 1.75.
