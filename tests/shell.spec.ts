@@ -6,7 +6,9 @@ import { _electron as electron, expect, test, type ElectronApplication } from '@
 import type { AgentDeckBridge } from '../src/shared/bridge'
 
 const MAIN = 'out/main/index.js'
-const ELECTRON_EXE = join('node_modules/electron/dist', readFileSync('node_modules/electron/path.txt', 'utf8'))
+// The electron package exports its binary path and downloads the binary on first require (fresh CI installs).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ELECTRON_EXE = require('electron') as string
 
 let launched: ElectronApplication[] = []
 let dirs: string[] = []
