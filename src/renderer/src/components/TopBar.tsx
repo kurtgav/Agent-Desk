@@ -3,9 +3,9 @@ import { Ellipsis, House, Plus, Search } from 'lucide-react'
 import { useUi } from '@/store'
 import { running } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Hint, IconButton, PENDING_LABEL, pending } from './ui'
+import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, pending, type Milestone } from './ui'
 
-const MENU_ITEMS: [string, keyof typeof PENDING_LABEL][] = [
+const MENU_ITEMS: [string, Milestone][] = [
   ['Pause notifications', 'M3'],
   ['Diagnostics', 'M5'],
   ['Settings', 'M5']
@@ -62,7 +62,8 @@ export function TopBar() {
       <div className="app-no-drag flex items-center gap-2">
         {mode === 'demo' && (
           <Hint label="Sample data for the M1 design check. Live data arrives in M2.">
-            <span role="status" className="inline-flex h-[26px] items-center gap-1.5 rounded-full bg-[var(--needs-bg)] px-2.5 text-[12px] font-medium text-[var(--needs-ink)]">
+            {/* Focusable so keyboard users can reach the explanation in the tooltip. */}
+            <span tabIndex={0} className="inline-flex h-[26px] items-center gap-1.5 rounded-full bg-[var(--needs-bg)] px-2.5 text-[12px] font-medium text-[var(--needs-ink)]">
               <span className="size-1.5 rounded-full bg-[var(--needs)]" aria-hidden />
               Demo data
             </span>
@@ -82,9 +83,7 @@ export function TopBar() {
           <Menu.Portal>
             <Menu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
               {MENU_ITEMS.map(([label, m]) => (
-                <Menu.Item key={label} disabled className="flex items-center justify-between gap-4 rounded-md px-2 py-1.5 data-[disabled]:text-muted">
-                  {label} <span className="text-[12px]">{m}</span>
-                </Menu.Item>
+                <PendingMenuItem key={label} label={label} m={m} />
               ))}
             </Menu.Content>
           </Menu.Portal>

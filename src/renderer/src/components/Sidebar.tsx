@@ -1,11 +1,11 @@
 import type { ComponentType, ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { Activity, ChevronDown, Files, FolderClosed, Gauge, House, LayoutList, PanelLeft, Plus, Search, Settings, ShieldCheck } from 'lucide-react'
+import { Activity, Check, ChevronDown, Files, FolderClosed, Gauge, House, LayoutList, PanelLeft, Plus, Search, Settings, ShieldCheck } from 'lucide-react'
 import { useUi } from '@/store'
 import { needsOkCount, recentProjects } from '@/lib/selectors'
 import { tokens, usd } from '@/lib/format'
 import { Avatar, Mark } from './Avatar'
-import { Button, Hint, IconButton, PENDING_LABEL, cn, pending, type Milestone } from './ui'
+import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, cn, pending, type Milestone } from './ui'
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 
@@ -13,6 +13,14 @@ export const USER_NAME = 'Kurt' // D-014; editable in Settings (M5)
 
 function focusComposer(): void {
   document.getElementById('composer-input')?.focus()
+}
+
+const TOGGLE_ID = 'sidebar-toggle'
+
+/** Collapse and Expand are different buttons in different places; keep focus on whichever now exists. */
+function toggleAndKeepFocus(toggle: () => void): void {
+  toggle()
+  requestAnimationFrame(() => document.getElementById(TOGGLE_ID)?.focus())
 }
 
 function NavItem({ icon: I, label, current, badge, m, collapsed }: { icon: Icon; label: string; current?: boolean; badge?: number; m?: Milestone; collapsed: boolean }) {
@@ -31,8 +39,9 @@ function NavItem({ icon: I, label, current, badge, m, collapsed }: { icon: Icon;
       <I size={16} strokeWidth={1.75} className={current ? 'text-ink' : 'text-muted'} />
       {!collapsed && <span className="truncate">{label}</span>}
       {!collapsed && badge ? (
-        <span className="ml-auto text-[12px] font-medium tabular-nums text-muted" aria-label={`${badge} open`}>
+        <span className="ml-auto text-[12px] font-medium tabular-nums text-muted">
           {badge}
+          <span className="sr-only"> open</span>
         </span>
       ) : null}
     </button>
@@ -69,13 +78,9 @@ function Switcher({ collapsed }: { collapsed: boolean }) {
       <Menu.Portal>
         <Menu.Content align="start" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
           <Menu.Label className="px-2 py-1.5 text-[12px] text-muted">AgentDeck {version}</Menu.Label>
-          <Menu.CheckboxItem checked disabled className="flex items-center justify-between gap-4 rounded-md px-2 py-1.5 data-[disabled]:text-muted">
-            Demo data <span className="text-[12px]">Live data in M2</span>
-          </Menu.CheckboxItem>
+          <PendingMenuItem label="Demo data is on" m="M2" icon={<Check size={14} className="mt-0.5 flex-none text-ink" />} />
           <Menu.Separator className="my-1 h-px bg-rule" />
-          <Menu.Item disabled className="flex items-center justify-between gap-4 rounded-md px-2 py-1.5 data-[disabled]:text-muted">
-            Diagnostics <span className="text-[12px]">M5</span>
-          </Menu.Item>
+          <PendingMenuItem label="Diagnostics" m="M5" icon={<span className="w-3.5 flex-none" />} />
         </Menu.Content>
       </Menu.Portal>
     </Menu.Root>
@@ -99,7 +104,7 @@ function UsageCard() {
   }
   const share = Math.min(1, usage.weekCostUsd / usage.weeklyBudgetUsd)
   return (
-    <div className="rounded-tile border border-line bg-surface p-3" aria-label="Usage, estimated">
+    <div role="group" className="rounded-tile border border-line bg-surface p-3" aria-label="Usage, estimated">
       <div className="flex items-center gap-2">
         <Gauge size={14} strokeWidth={1.75} className="text-muted" />
         <span className="text-[13px] font-semibold">Usage</span>
@@ -114,7 +119,8 @@ function UsageCard() {
         aria-label="Weekly budget used"
         aria-valuemin={0}
         aria-valuemax={usage.weeklyBudgetUsd}
-        aria-valuenow={usage.weekCostUsd}
+        aria-valuenow={Math.min(usage.weekCostUsd, usage.weeklyBudgetUsd)}
+        aria-valuetext={`${usd(usage.weekCostUsd)} of ${usd(usage.weeklyBudgetUsd)}`}
         className="mt-2 h-1.5 overflow-hidden rounded-full bg-track"
       >
         <div className="h-full rounded-full bg-accent" style={{ width: `${share * 100}%` }} />
@@ -134,12 +140,19 @@ export function Sidebar() {
   const projects = recentProjects(snapshot, 5)
 
   return (
-    <aside aria-label="Sidebar" className={cn('flex h-full flex-none flex-col bg-ground', collapsed ? 'w-16' : 'w-[216px]')}>
+    <aside id="sidebar" aria-label="Sidebar" className={cn('flex h-full flex-none flex-col bg-ground', collapsed ? 'w-16' : 'w-[216px]')}>
       <div className={cn('app-drag flex h-12 flex-none items-center gap-1 px-2.5', collapsed && 'justify-center')}>
         <Switcher collapsed={collapsed} />
         {!collapsed && (
           <Hint label="Collapse sidebar">
-            <IconButton aria-label="Collapse sidebar" className="app-no-drag ml-auto" onClick={toggle}>
+            <IconButton
+              id={TOGGLE_ID}
+              aria-label="Collapse sidebar"
+              aria-expanded
+              aria-controls="sidebar"
+              className="app-no-drag ml-auto"
+              onClick={() => toggleAndKeepFocus(toggle)}
+            >
               <PanelLeft size={16} strokeWidth={1.75} />
             </IconButton>
           </Hint>
@@ -149,7 +162,7 @@ export function Sidebar() {
       <div className={cn('flex flex-none gap-2 px-2.5 pt-2', collapsed && 'flex-col items-center')}>
         {collapsed ? (
           <Hint side="right" label="Expand sidebar">
-            <IconButton aria-label="Expand sidebar" onClick={toggle}>
+            <IconButton id={TOGGLE_ID} aria-label="Expand sidebar" aria-expanded={false} aria-controls="sidebar" onClick={() => toggleAndKeepFocus(toggle)}>
               <PanelLeft size={16} strokeWidth={1.75} />
             </IconButton>
           </Hint>

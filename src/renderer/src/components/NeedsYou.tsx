@@ -7,7 +7,7 @@ import { useUi } from '@/store'
 import { ago } from '@/lib/format'
 import { byPriority, projectName, sessionIndex } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, pending } from './ui'
+import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, cn, pending } from './ui'
 
 const MAX_ROWS = 3 // the reference shows three; the rest sit behind "See all"
 
@@ -143,7 +143,8 @@ function Row({ item, session, now }: { item: AttentionItem; session: Session | u
         <k.icon size={15} strokeWidth={1.75} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] leading-5">
+        {/* Approvals wrap so the tail of a long command is never hidden behind an ellipsis. */}
+        <p className={cn('text-[14px] leading-5', item.kind === 'approval' ? '[overflow-wrap:anywhere]' : 'truncate')}>
           <Inline text={item.title} />
         </p>
         <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-muted">

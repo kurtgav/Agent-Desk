@@ -5,7 +5,9 @@ import { useUi } from '@/store'
 import { ageWords, dateLabel, duration, timeOfDay, weekDelta } from '@/lib/format'
 import { filesChanged, recentProjects, summaryLine, tasksFinished, waiting } from '@/lib/selectors'
 import { USER_NAME } from './Sidebar'
-import { Button, Hint, IconButton, PENDING_LABEL, pending } from './ui'
+import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, pending } from './ui'
+
+const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' } as const
 
 export function Greeting() {
   const now = useUi((s) => s.now)
@@ -42,7 +44,7 @@ export function Composer() {
         id="composer-input"
         rows={1}
         placeholder="Tell an agent what to build, fix or research…"
-        className="block h-6 w-full resize-none bg-transparent text-[14px] leading-6 outline-none placeholder:text-muted"
+        className="block max-h-36 min-h-6 w-full resize-none bg-transparent text-[14px] leading-6 outline-none field-sizing-content placeholder:text-muted"
       />
       <div className="mt-1.5 flex items-center gap-1">
         <Menu.Root>
@@ -62,9 +64,7 @@ export function Composer() {
                   <span className="ml-auto max-w-40 truncate text-[12px] text-muted">{p.cwd}</span>
                 </Menu.Item>
               ))}
-              <Menu.Item disabled className={`${menuItem} data-[disabled]:text-muted`}>
-                <span className="w-3.5" /> Browse… <span className="ml-auto text-[12px]">M4</span>
-              </Menu.Item>
+              <PendingMenuItem label="Browse…" m="M4" icon={<span className="w-3.5 flex-none" />} />
             </Menu.Content>
           </Menu.Portal>
         </Menu.Root>
@@ -96,9 +96,9 @@ export function Composer() {
             </Menu.Portal>
           </Menu.Root>
           <Hint label="Effort for the new session (--effort). Click to change.">
-            <Button size="sm" className="h-7 px-2.5 text-[12px] capitalize" onClick={cycleEffort} aria-label={`Effort: ${effort}. Change effort`}>
+            <Button size="sm" className="h-7 px-2.5 text-[12px]" onClick={cycleEffort} aria-label={`Effort: ${EFFORT_LABEL[effort]}. Change effort`}>
               <Zap size={13} strokeWidth={1.75} />
-              {effort === 'xhigh' ? 'Extra high' : effort}
+              {EFFORT_LABEL[effort]}
             </Button>
           </Hint>
           <Hint label={`Dispatch: ${PENDING_LABEL.M4}`}>

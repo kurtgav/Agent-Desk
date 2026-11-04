@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react'
+import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -104,9 +105,28 @@ export function StatusPill({ status }: { status: Status }) {
 
 export function CountBadge({ n, label }: { n: number; label: string }) {
   return (
-    <span aria-label={`${n} ${label}`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-well px-1.5 text-[12px] font-medium tabular-nums text-muted">
+    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-well px-1.5 text-[12px] font-medium tabular-nums text-muted">
       {n}
+      <span className="sr-only"> {label}</span>
     </span>
+  )
+}
+
+/** A menu row whose backing arrives later (D-033): focusable, explains itself, does nothing. */
+export function PendingMenuItem({ label, m, icon }: { label: string; m: Milestone; icon?: ReactNode }) {
+  return (
+    <Menu.Item
+      onSelect={(e) => e.preventDefault()}
+      aria-disabled
+      data-pending={m}
+      className="flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 text-muted outline-none data-[highlighted]:bg-ground"
+    >
+      {icon}
+      <span className="flex flex-col">
+        <span className="text-ink">{label}</span>
+        <span className="text-[12px]">{PENDING_LABEL[m]}</span>
+      </span>
+    </Menu.Item>
   )
 }
 

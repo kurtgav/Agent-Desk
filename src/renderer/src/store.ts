@@ -68,12 +68,14 @@ export const useUi = create<UiState>((set) => ({
       const stillWaiting = attention.some((a) => a.sessionId === item.sessionId && a.priority === 1)
       const sessions = s.snapshot.sessions.map((x) =>
         x.id === item.sessionId && x.status === 'needs_you' && !stillWaiting && outcome !== 'dismissed'
-          ? { ...x, status: 'working' as const, waitingSince: null }
+          ? { ...x, status: 'working' as const, waitingSince: null, activity: 'Continuing after your answer' }
           : x
       )
+      // Naming the item keeps consecutive announcements distinct, so screen readers speak each one.
+      const what = item.title.replace(/`/g, '')
       return {
         snapshot: { ...s.snapshot, attention, sessions },
-        announcement: `${outcome[0]!.toUpperCase()}${outcome.slice(1)} in demo: nothing was sent.`
+        announcement: `${outcome[0]!.toUpperCase()}${outcome.slice(1)} in demo: ${what}. Nothing was sent.`
       }
     })
 }))
