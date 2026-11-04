@@ -5,3 +5,6 @@ dist/
 spikes/out/
 spikes/scratch/hello.txt
 spikes/scratch/sub/
+.taste-skill/
+test-results/
+playwright-report/
