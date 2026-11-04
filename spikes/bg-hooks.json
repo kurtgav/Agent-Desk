@@ -1,0 +1,228 @@
+﻿{
+    "hooks":  {
+                  "SessionEnd":  [
+                                     {
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "http",
+                                                           "url":  "http://127.0.0.1:47821/hooks",
+                                                           "timeout":  2,
+                                                           "headers":  {
+                                                                           "X-AgentDeck-Token":  "spike-token-0001"
+                                                                       }
+                                                       }
+                                                   ]
+                                     }
+                                 ],
+                  "UserPromptSubmit":  [
+                                           {
+                                               "hooks":  [
+                                                             {
+                                                                 "type":  "http",
+                                                                 "url":  "http://127.0.0.1:47821/hooks",
+                                                                 "timeout":  2,
+                                                                 "headers":  {
+                                                                                 "X-AgentDeck-Token":  "spike-token-0001"
+                                                                             }
+                                                             }
+                                                         ]
+                                           }
+                                       ],
+                  "PreToolUse":  [
+                                     {
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "http",
+                                                           "url":  "http://127.0.0.1:47821/hooks",
+                                                           "timeout":  2,
+                                                           "headers":  {
+                                                                           "X-AgentDeck-Token":  "spike-token-0001"
+                                                                       }
+                                                       }
+                                                   ]
+                                     }
+                                 ],
+                  "PostToolUse":  [
+                                      {
+                                          "hooks":  [
+                                                        {
+                                                            "type":  "http",
+                                                            "url":  "http://127.0.0.1:47821/hooks",
+                                                            "timeout":  2,
+                                                            "headers":  {
+                                                                            "X-AgentDeck-Token":  "spike-token-0001"
+                                                                        }
+                                                        }
+                                                    ]
+                                      }
+                                  ],
+                  "PostToolUseFailure":  [
+                                             {
+                                                 "hooks":  [
+                                                               {
+                                                                   "type":  "http",
+                                                                   "url":  "http://127.0.0.1:47821/hooks",
+                                                                   "timeout":  2,
+                                                                   "headers":  {
+                                                                                   "X-AgentDeck-Token":  "spike-token-0001"
+                                                                               }
+                                                               }
+                                                           ]
+                                             }
+                                         ],
+                  "PermissionRequest":  [
+                                            {
+                                                "hooks":  [
+                                                              {
+                                                                  "type":  "http",
+                                                                  "url":  "http://127.0.0.1:47821/hooks",
+                                                                  "timeout":  20,
+                                                                  "headers":  {
+                                                                                  "X-AgentDeck-Token":  "spike-token-0001"
+                                                                              }
+                                                              }
+                                                          ]
+                                            }
+                                        ],
+                  "PermissionDenied":  [
+                                           {
+                                               "hooks":  [
+                                                             {
+                                                                 "type":  "http",
+                                                                 "url":  "http://127.0.0.1:47821/hooks",
+                                                                 "timeout":  2,
+                                                                 "headers":  {
+                                                                                 "X-AgentDeck-Token":  "spike-token-0001"
+                                                                             }
+                                                             }
+                                                         ]
+                                           }
+                                       ],
+                  "Notification":  [
+                                       {
+                                           "hooks":  [
+                                                         {
+                                                             "type":  "http",
+                                                             "url":  "http://127.0.0.1:47821/hooks",
+                                                             "timeout":  2,
+                                                             "headers":  {
+                                                                             "X-AgentDeck-Token":  "spike-token-0001"
+                                                                         }
+                                                         }
+                                                     ]
+                                       }
+                                   ],
+                  "Stop":  [
+                               {
+                                   "hooks":  [
+                                                 {
+                                                     "type":  "http",
+                                                     "url":  "http://127.0.0.1:47821/hooks",
+                                                     "timeout":  2,
+                                                     "headers":  {
+                                                                     "X-AgentDeck-Token":  "spike-token-0001"
+                                                                 }
+                                                 }
+                                             ]
+                               }
+                           ],
+                  "StopFailure":  [
+                                      {
+                                          "hooks":  [
+                                                        {
+                                                            "type":  "http",
+                                                            "url":  "http://127.0.0.1:47821/hooks",
+                                                            "timeout":  2,
+                                                            "headers":  {
+                                                                            "X-AgentDeck-Token":  "spike-token-0001"
+                                                                        }
+                                                        }
+                                                    ]
+                                      }
+                                  ],
+                  "SubagentStart":  [
+                                        {
+                                            "hooks":  [
+                                                          {
+                                                              "type":  "http",
+                                                              "url":  "http://127.0.0.1:47821/hooks",
+                                                              "timeout":  2,
+                                                              "headers":  {
+                                                                              "X-AgentDeck-Token":  "spike-token-0001"
+                                                                          }
+                                                          }
+                                                      ]
+                                        }
+                                    ],
+                  "SubagentStop":  [
+                                       {
+                                           "hooks":  [
+                                                         {
+                                                             "type":  "http",
+                                                             "url":  "http://127.0.0.1:47821/hooks",
+                                                             "timeout":  2,
+                                                             "headers":  {
+                                                                             "X-AgentDeck-Token":  "spike-token-0001"
+                                                                         }
+                                                         }
+                                                     ]
+                                       }
+                                   ],
+                  "TaskCreated":  [
+                                      {
+                                          "hooks":  [
+                                                        {
+                                                            "type":  "http",
+                                                            "url":  "http://127.0.0.1:47821/hooks",
+                                                            "timeout":  2,
+                                                            "headers":  {
+                                                                            "X-AgentDeck-Token":  "spike-token-0001"
+                                                                        }
+                                                        }
+                                                    ]
+                                      }
+                                  ],
+                  "TaskCompleted":  [
+                                        {
+                                            "hooks":  [
+                                                          {
+                                                              "type":  "http",
+                                                              "url":  "http://127.0.0.1:47821/hooks",
+                                                              "timeout":  2,
+                                                              "headers":  {
+                                                                              "X-AgentDeck-Token":  "spike-token-0001"
+                                                                          }
+                                                          }
+                                                      ]
+                                        }
+                                    ],
+                  "PreCompact":  [
+                                     {
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "http",
+                                                           "url":  "http://127.0.0.1:47821/hooks",
+                                                           "timeout":  2,
+                                                           "headers":  {
+                                                                           "X-AgentDeck-Token":  "spike-token-0001"
+                                                                       }
+                                                       }
+                                                   ]
+                                     }
+                                 ],
+                  "CwdChanged":  [
+                                     {
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "http",
+                                                           "url":  "http://127.0.0.1:47821/hooks",
+                                                           "timeout":  2,
+                                                           "headers":  {
+                                                                           "X-AgentDeck-Token":  "spike-token-0001"
+                                                                       }
+                                                       }
+                                                   ]
+                                     }
+                                 ]
+              }
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "249e7bbb-edfc-4363-9007-d004c9cbe325",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\249e7bbb-edfc-4363-9007-d004c9cbe325.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "88682d4f-fbf8-4c2f-a2f6-2e3733a7047a",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "mkdir perm-allow",
+    "description": "Run mkdir perm-allow in the working directory"
+  },
+  "tool_use_id": "toolu_01L8PSBmxmpMuUBtE9GekGgo"
+}

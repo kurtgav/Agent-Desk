@@ -1,0 +1,30 @@
+{
+  "session_id": "25f5f1ab-be85-4345-ae42-159b4961f6f4",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\25f5f1ab-be85-4345-ae42-159b4961f6f4.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "0d870bc2-df9d-40fb-b37e-8e35e7d49e97",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "mkdir perm-deny",
+    "description": "Create directory perm-deny"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addDirectories",
+      "directories": [
+        "D:\\personal\\agentdeck\\spikes\\scratch"
+      ],
+      "destination": "session"
+    },
+    {
+      "type": "setMode",
+      "mode": "acceptEdits",
+      "destination": "session"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "session_id": "2afb6f39-5dd7-4a3c-a86f-840775c89dd5",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "620ab80a-3329-434a-95bf-f0ea3c93fb2b",
+  "permission_mode": "default",
+  "agent_id": "adb875602d90356fb",
+  "agent_type": "Explore",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "Get-ChildItem -LiteralPath 'D:\\personal\\agentdeck\\spikes\\scratch' -File | Select-Object -ExpandProperty Name",
+    "description": "List file names directly in the scratch folder"
+  },
+  "tool_use_id": "toolu_017q5F2sgr71KUqWEiv9E6hj"
+}

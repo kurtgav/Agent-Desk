@@ -1,0 +1,15 @@
+{
+  "session_id": "25f5f1ab-be85-4345-ae42-159b4961f6f4",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\25f5f1ab-be85-4345-ae42-159b4961f6f4.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "0d870bc2-df9d-40fb-b37e-8e35e7d49e97",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Not OK. The shell call was rejected with this exact message: `Rejected in AgentDeck`. I did not retry, so `perm-deny` was not created.",
+  "background_tasks": [],
+  "session_crons": []
+}

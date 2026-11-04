@@ -1,0 +1,43 @@
+{
+  "session_id": "2afb6f39-5dd7-4a3c-a86f-840775c89dd5",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "620ab80a-3329-434a-95bf-f0ea3c93fb2b",
+  "permission_mode": "default",
+  "agent_type": "ui-color-palette:uicper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "D:\\personal\\agentdeck\\spikes\\scratch\\hello.txt",
+    "old_string": "hi",
+    "new_string": "hello",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "D:\\personal\\agentdeck\\spikes\\scratch\\hello.txt",
+    "oldString": "hi",
+    "newString": "hello",
+    "originalFile": "hi",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 1,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": [
+          "-hi",
+          "\\ No newline at end of file",
+          "+hello",
+          "\\ No newline at end of file"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01Xy1aionFSVHAs2yfnSeNwk",
+  "duration_ms": 374
+}

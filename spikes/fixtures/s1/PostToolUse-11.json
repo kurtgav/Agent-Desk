@@ -1,0 +1,27 @@
+{
+  "session_id": "bd8a015c-1825-4768-be94-ea7e9eb5bde3",
+  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\bd8a015c-1825-4768-be94-ea7e9eb5bde3.jsonl",
+  "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
+  "prompt_id": "a0ca9732-509e-4368-9aa0-70d6cc39d146",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "D:\\personal\\agentdeck\\spikes\\scratch\\notes.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "D:\\personal\\agentdeck\\spikes\\scratch\\notes.txt",
+      "content": "alpha beta gamma\n",
+      "numLines": 2,
+      "startLine": 1,
+      "totalLines": 2
+    }
+  },
+  "tool_use_id": "toolu_01THawRwoqhSd2gvvEoq6GU4",
+  "duration_ms": 89
+}
