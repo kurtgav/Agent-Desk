@@ -1,0 +1,7 @@
+node_modules/
+out/
+dist/
+*.log
+spikes/out/
+spikes/scratch/hello.txt
+spikes/scratch/sub/
