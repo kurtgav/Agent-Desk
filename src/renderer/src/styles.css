@@ -1,0 +1,144 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens tuned against docs/reference/dashboard.png (UI_MAP § Layout tokens, D-032).
+ * Light theme now; the dark block is ready but not switchable until Settings (M5).
+ */
+:root {
+  --ground: #f6f6f6;
+  --surface: #ffffff;
+  --tile: #f6f6f6;
+  --active: #ebebed;
+  --well: #f2f2f3;
+  --border: #eaeaea;
+  --rule: #f1f1f2;
+  --control: #dcdcdf;
+  --ink: #18181b;
+  --muted: #6b6b72;
+  --accent: #0a84ff;
+  /* Filled controls: white text on #0A84FF is 3.6:1, so fills use a deeper blue (4.7:1). */
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0064c8;
+  --track: #ebebeb;
+  --focus: #0a84ff;
+
+  --working: #0a84ff;  --working-bg: #e6f0fe;  --working-ink: #0b4fa8;
+  --needs: #f59e0b;    --needs-bg: #fef3c7;    --needs-ink: #92400e;
+  --failed: #ef4444;   --failed-bg: #fee2e2;   --failed-ink: #991b1b;
+  --idle: #a1a1aa;     --idle-bg: #efeff1;     --idle-ink: #52525b;
+  --done: #22c55e;     --done-bg: #dcfce7;     --done-ink: #166534;
+}
+
+:root[data-theme='dark'] {
+  --ground: #0f0f10;
+  --surface: #18181b;
+  --tile: #202023;
+  --active: #27272a;
+  --well: #202023;
+  --border: #2a2a2e;
+  --rule: #232326;
+  --control: #3f3f46;
+  --ink: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #3b9bff;
+  --accent-fill: #0a84ff;
+  --accent-fill-hover: #3b9bff;
+  --track: #2a2a2e;
+  --focus: #3b9bff;
+  --working-bg: #0b2a4a;  --working-ink: #9cc9ff;
+  --needs-bg: #3a2a07;    --needs-ink: #fcd34d;
+  --failed-bg: #3b1414;   --failed-ink: #fca5a5;
+  --idle-bg: #27272a;     --idle-ink: #d4d4d8;
+  --done-bg: #0f2e1a;     --done-ink: #86efac;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-tile: var(--tile);
+  --color-active: var(--active);
+  --color-well: var(--well);
+  --color-line: var(--border);
+  --color-rule: var(--rule);
+  --color-control: var(--control);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-fill-hover: var(--accent-fill-hover);
+  --color-track: var(--track);
+  --radius-card: 16px;
+  --radius-tile: 12px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--control) transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  [aria-disabled='true'] {
+    cursor: default;
+  }
+}
+
+/* Window caption buttons (titleBarOverlay) sit over the top bar's right end. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+.caption-inset {
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px);
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.bar-indeterminate {
+  animation: indeterminate 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar-indeterminate {
+    animation: none;
+    transform: translateX(75%);
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+  }
+}
