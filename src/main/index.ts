@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, ipcMain, session, type BrowserWindow, type Tray } from 'electron'
+import { app, ipcMain, Menu, session, type BrowserWindow, type Tray } from 'electron'
 import { IPC, type AppInfo } from '@shared/bridge'
 import { readConfig, updateConfig } from './config'
 import { registerAppScheme, serveRenderer } from './protocol'
@@ -22,33 +22,45 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   registerAppScheme()
-  app.on('second-instance', () => {
-    if (win) showWindow(win)
-  })
+  app.on('second-instance', () => openWindow())
   app.on('window-all-closed', () => {
     // Keep running in the tray: quitting happens only from the tray menu.
   })
   void app.whenReady().then(start)
 }
 
-function start(): void {
-  const configFile = join(app.getPath('userData'), 'config.json')
+function configFile(): string {
+  return join(app.getPath('userData'), 'config.json')
+}
 
+function newWindow(hidden: boolean): BrowserWindow {
+  return createMainWindow({
+    hidden,
+    icon: join(RESOURCES, 'icon.png'),
+    onHiddenToTray: () => showTrayHintOnce(configFile())
+  })
+}
+
+/** Shows the window, recreating it if something (a crash, a logoff race) destroyed it. */
+function openWindow(): void {
+  if (!app.isReady()) return
+  if (!win || win.isDestroyed()) {
+    win = newWindow(false)
+    return // createMainWindow reveals it on ready-to-show
+  }
+  showWindow(win)
+}
+
+function start(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  // Packaged builds drop the default menu, whose accelerators include DevTools and Reload.
+  if (app.isPackaged) Menu.setApplicationMenu(null)
   serveRenderer(RENDERER_ROOT)
   ipcMain.handle(IPC.appInfo, (): AppInfo => ({ version: app.getVersion(), demo: true }))
-  registerAutostartOnce(configFile)
+  registerAutostartOnce(configFile())
 
-  const mainWindow = createMainWindow({
-    hidden: process.argv.includes('--hidden'),
-    icon: join(RESOURCES, 'icon.png'),
-    onHiddenToTray: () => showTrayHintOnce(configFile)
-  })
-  win = mainWindow
-  tray = createTray(join(RESOURCES, 'tray.png'), {
-    open: () => showWindow(mainWindow),
-    quit: () => app.quit()
-  })
+  win = newWindow(process.argv.includes('--hidden'))
+  tray = createTray(join(RESOURCES, 'tray.png'), { open: openWindow, quit: () => app.quit() })
 }
 
 /** ADR-0012: register the login item on the first packaged run only; never the dev electron.exe. */

@@ -6,6 +6,8 @@ import { buildWindowOptions } from './window-options'
 import { resolveWindowState } from './window-state'
 
 const SAVE_DELAY_MS = 500
+const RELOAD_BACKOFF_MS = 5_000
+const SESSION_END_GRACE_MS = 10_000
 
 export function showWindow(win: BrowserWindow): void {
   if (win.isDestroyed()) return
@@ -62,6 +64,13 @@ function lockDown(win: BrowserWindow): void {
   win.webContents.on('will-navigate', (event) => {
     if (!isAppUrl(event.url, allowedDevUrl)) event.preventDefault()
   })
+  // A crashed renderer would leave a blank window; reload it, but not in a tight loop.
+  let lastReload = 0
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || Date.now() - lastReload < RELOAD_BACKOFF_MS) return
+    lastReload = Date.now()
+    win.webContents.reload()
+  })
   // The title is fixed for M1 (demo); the page's <title> must not replace it.
   win.on('page-title-updated', (event) => event.preventDefault())
 }
@@ -85,16 +94,20 @@ function persistState(win: BrowserWindow, stateFile: string): void {
 
 function closeToTray(win: BrowserWindow, onHiddenToTray: () => void): void {
   let quitting = false
+  let sessionEndingUntil = 0
   const allowClose = (): void => {
     quitting = true
   }
   app.on('before-quit', allowClose)
-  // Windows logoff/shutdown must never be blocked by our hide-on-close.
-  win.on('query-session-end', allowClose)
+  // Windows logoff/shutdown must never be blocked by our hide-on-close. Another app can veto
+  // the logoff after query-session-end, so that allowance expires instead of latching.
+  win.on('query-session-end', () => {
+    sessionEndingUntil = Date.now() + SESSION_END_GRACE_MS
+  })
   win.on('session-end', allowClose)
 
   win.on('close', (event) => {
-    if (quitting) return
+    if (quitting || Date.now() < sessionEndingUntil) return
     event.preventDefault()
     win.hide()
     onHiddenToTray()

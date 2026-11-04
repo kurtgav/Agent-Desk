@@ -87,12 +87,58 @@ test('window appears with the demo title, minimum size and locked-down renderer'
   expect(renderer.require).toBe('undefined')
   expect(renderer.process).toBe('undefined')
 
-  // app:// never serves anything outside out/renderer, however the path is spelled.
+  // app:// never serves anything outside out/renderer, however the path is spelled. (A plain
+  // `/../..` is normalised by the URL parser before the handler, so only encoded forms test the guard.)
   const statuses = await page.evaluate(async () => {
-    const paths = ['/index.html', '/../../package.json', '/..%2F..%2Fpackage.json', '/..%5C..%5Cpackage.json', '/assets/', '/nope.js']
+    const paths = ['/index.html', '/..%2F..%2Fpackage.json', '/..%5C..%5Cpackage.json', '/assets/', '/nope.js']
     return Promise.all(paths.map(async (p) => (await fetch(`app://agentdeck${p}`)).status))
   })
-  expect(statuses).toEqual([200, 404, 404, 404, 404, 404])
+  expect(statuses).toEqual([200, 404, 404, 404, 404])
+})
+
+test('CSP, navigation, popups and permissions are enforced at runtime', async () => {
+  const app = await launch(freshUserData())
+  const page = await app.firstWindow()
+  await page.waitForLoadState('load')
+
+  const result = await page.evaluate(async () => {
+    const g = globalThis as unknown as {
+      document: { createElement(t: string): { textContent: string }; head: { appendChild(n: unknown): void } }
+      fetch: typeof fetch
+      open(url: string): unknown
+      Notification: { requestPermission(): Promise<string> }
+      __inline?: number
+    }
+    const header = (await g.fetch('app://agentdeck/index.html')).headers.get('content-security-policy')
+    const s = g.document.createElement('script')
+    s.textContent = 'globalThis.__inline = 1'
+    g.document.head.appendChild(s)
+    let evalBlocked = false
+    try {
+      eval('1') // must throw: script-src has no 'unsafe-eval'
+    } catch {
+      evalBlocked = true
+    }
+    return {
+      header,
+      inlineRan: g.__inline === 1,
+      evalBlocked,
+      popup: g.open('https://example.com/') === null,
+      notifications: await g.Notification.requestPermission()
+    }
+  })
+  expect(result.header).toContain("script-src 'self'")
+  expect(result.header).toContain("frame-ancestors 'none'")
+  expect(result.inlineRan).toBe(false)
+  expect(result.evalBlocked).toBe(true)
+  expect(result.popup).toBe(true)
+  expect(result.notifications).toBe('denied')
+
+  await page.evaluate(() => {
+    ;(globalThis as unknown as { location: { href: string } }).location.href = 'https://example.com/'
+  })
+  await page.waitForTimeout(500)
+  expect(page.url()).toBe('app://agentdeck/index.html')
 })
 
 test('closing hides to the tray, keeps running, and the open path shows it again', async () => {
@@ -107,6 +153,14 @@ test('closing hides to the tray, keeps running, and the open path shows it again
   expect(JSON.parse(readFileSync(join(userData, 'config.json'), 'utf8')).trayHintShown).toBe(true)
 
   // Tray "Open AgentDeck", tray clicks and second-instance all call the same showWindow().
+  await app.evaluate(({ app: electronApp }) => {
+    electronApp.emit('second-instance')
+  })
+  await expectVisible(app, true)
+
+  // If the window is ever destroyed (renderer crash, logoff race), the open path recreates it.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.destroy())
+  await expect.poll(async () => (await windowState(app)).count).toBe(0)
   await app.evaluate(({ app: electronApp }) => {
     electronApp.emit('second-instance')
   })
