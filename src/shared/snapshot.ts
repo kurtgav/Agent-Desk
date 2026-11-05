@@ -83,8 +83,10 @@ export type Usage = z.infer<typeof Usage>
 export const Snapshot = z.object({
   mode: z.enum(['demo', 'live']),
   generatedAt: Ts,
-  /** When the window last lost focus (D-007); null while it has focus and nothing is pending. */
+  /** When the window last lost focus (D-007); null until it first does. */
   awaySince: Ts.nullable(),
+  /** When it got focus back; null while still away. "While you were away" counts [awaySince, awayUntil] (D-060). */
+  awayUntil: Ts.nullable(),
   sessions: z.array(Session),
   attention: z.array(AttentionItem),
   /** Files changed by edit tools this week, newest first. */
