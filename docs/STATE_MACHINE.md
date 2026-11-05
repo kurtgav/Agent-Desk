@@ -25,7 +25,8 @@ stateDiagram-v2
   1. An open P1 item makes the pill Needs you, whatever else is true.
   2. The latest turn outcome comes next.
   3. Otherwise the poll status decides.
-- **Hooks vs poll:** hook events win over the poll for ~5 s after they arrive, so a lagging poll cannot flip the state back. The poll wins for sessions with no hook traffic, such as untrusted folders (labelled "Hooks blocked: folder not trusted") or hooks paused.
+- **Hooks vs poll:** hook events win over the poll for ~5 s after they arrive, so a lagging poll cannot flip the state back. A poll held back this way is kept and applied once the window has passed (D-058): the Poller reports only rows that change, so an Esc mid-turn (no Stop hook) seen inside the window would otherwise never be applied. The poll wins for sessions with no hook traffic, such as untrusted folders (labelled "Hooks blocked: folder not trusted") or hooks paused.
+- **Restart (D-057):** a session that was `working` when AgentDeck stopped has its stretch closed at its last event and shows `idle` until a hook or the poll says otherwise; nobody saw what it did meanwhile. The first poll after a restart ends every stored live session it does not list. A vanished row does not move `lastEventAt`: the session ended at some point since its last event, not when we noticed.
 - **Stale:** after sleep/resume, or a gap of more than 3 polls, sessions are marked `stale` (pill shows "Checking…") until the next poll confirms them.
 - **Subagents** do not change the session's pill. They have their own rows.
 
@@ -99,13 +100,13 @@ Checked against Bash/PowerShell `tool_input.command`, file-tool `file_path` and 
 | Outside workspace | file tools whose `file_path` is not under the session cwd (case-insensitive, after `path.resolve`) |
 
 ## 6. Unit tests required before M2 and M3 are done
-Reducers are tested against the fixtures in `spikes/fixtures/s1` (moved into `test/fixtures` in M2) plus synthetic sequences.
+Reducers are tested against the fixtures in `test/fixtures/hooks/2.1.318` plus synthetic sequences (`src/collector/reduce.test.ts`, `store.test.ts`, `app.test.ts`). M2 covers 1, 2, 3, 4 (interactive and background), 6 and 7; 5, 8 and 9 belong to the attention engine (M3).
 1. S1 replay gives: 1 session done; Explore subagent nested and finished; 1 task created and completed; files = `hello.txt`; the synthetic `<task-notification>` prompt is not counted as a turn.
 2. S4 sequences: allow (Post with the same id) resolves as approved; deny/empty (`turn.stopped` with no Post) resolves as denied; the inflight set is empty after Stop.
 3. PermissionRequest correlation picks the right PreToolUse when two parallel tool calls have the same `tool_name` and different inputs.
 4. The poll alone (no hooks) drives idle → working → needs_you (bg `waitingFor`) → stopped.
 5. Stall: there are no false positives while a tool is in flight below M, and none during an async subagent launch.
 6. Precedence: a lagging poll shows `busy` after `turn.stopped` and must not undo `done` within 5 s.
-7. Ordering: duplicate or out-of-order hook deliveries are idempotent (dedupe on `(sessionId, hook_event_name, tool_use_id \| prompt_id \| ts)`).
+7. Ordering: duplicate or out-of-order hook deliveries are idempotent (dedupe on the SHA-256 of the raw body within 2 s, D-044, D-056). A byte-identical body after the window is a new event.
 8. Risk-flag table: one positive and one negative case per row.
 9. Resolution ≤ 2 s: a simulated clock asserts that each resolution path closes the item on the next event or the next poll.

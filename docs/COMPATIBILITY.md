@@ -11,7 +11,7 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 ## Hooks
 | Interface | What AgentDeck relies on | Source | 2.1.318 | 2.1.317 (Desktop) |
 |---|---|---|---|---|
-| `type:"http"` handler | `url`, `headers`, `timeout`; JSON POST body | hooks § HTTP hook fields | spike S1 | unverified |
+| `type:"http"` handler | `url`, `headers`, `timeout`; JSON POST body | hooks § HTTP hook fields | spike S1; live M2 (collector, real `-p` run) | unverified |
 | Not on SessionStart / Setup | "They don't support `http`…" | hooks § Prompt-based hooks | docs | docs |
 | Failure is non-blocking | refused / non-2xx / timeout → action continues | hooks § HTTP response handling | spike S2 | unverified |
 | Timeout cancels the hook | cancelled at `timeout`; default 600 s otherwise | hooks § Common fields, § Timeouts | spike S3 | — |
@@ -20,7 +20,7 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | PermissionRequest input | `tool_name`, `tool_input`, `permission_suggestions`; **no `tool_use_id`** | hooks § PermissionRequest input | spike S4 | — |
 | No decision in a no-prompt session | tool denied | hooks § PermissionRequest | spike S4 | — |
 | Empty reply in an interactive session | normal dialog shows | hooks (implied, not stated) | **unverified (S7b)** | unverified |
-| Subagent attribution | `agent_id` only inside subagents; `agent_type` also on the main thread under `--agent` | hooks § Common input fields | spike S1 | — |
+| Subagent attribution | `agent_id` only inside subagents; `agent_type` also on the main thread under `--agent` (S1's main thread carried `ui-color-palette:uicper`), so AgentDeck takes subagent types from `SubagentStart` only | hooks § Common input fields | spike S1 | — |
 | Stop / SubagentStop | `last_assistant_message`, `stop_hook_active`, `background_tasks` | hooks § Stop input | spike S1 | — |
 | TaskCreated / TaskCompleted | `task_id`, `task_subject`, `task_description` | hooks § TaskCreated input | spike S1 | — |
 | PostToolUseFailure | `error`, `is_interrupt`, `duration_ms` | hooks § PostToolUseFailure input | spike S1 | — |
@@ -38,10 +38,11 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | Interface | What AgentDeck relies on | Source | 2.1.318 |
 |---|---|---|---|
 | `--json --all` | JSON array, no TTY needed | agent-view § List sessions as JSON | live |
-| Interactive rows | `pid,cwd,kind,startedAt,sessionId,name,status` (no `id`/`state`) | live run | live |
+| Interactive rows | `pid,cwd,kind,startedAt,sessionId,name,status` (no `id`/`state`); `startedAt` is epoch ms | live run | live |
+| `-p` runs | listed while running as `kind:"interactive"`, `status:"busy"`, with a generated `name` (e.g. `scratch-bc`); the row disappears on exit | live M2 run | live |
 | Background rows | adds `id`, `state` ∈ working, blocked, done, failed, stopped | agent-view § Read session state | spike S7 (blocked, done, stopped, failed) |
-| `waitingFor` | `permission prompt` seen; `input needed`, `dialog open`, `sandbox request`, `worker request` docs-only | agent-view table | spike S7 + docs |
-| Surfaces | CLI ✓, Claude Desktop ✓, `--bg` ✓, VS Code ? | live run | live / **VS Code unverified** |
+| `waitingFor` | `permission prompt` seen (background and interactive rows), `input needed` seen on an interactive row; `dialog open`, `sandbox request`, `worker request` docs-only | agent-view table | spike S7 + live M2 + docs |
+| Surfaces | CLI ✓, Claude Desktop ✓ (from the pid's exe path, D-045), `--bg` ✓, VS Code ? | live run | live / **VS Code unverified** |
 | Disabled agent view | `disableAgentView` / `CLAUDE_CODE_DISABLE_AGENT_VIEW` | agent-view § Turn off agent view | docs |
 | Untrusted cwd | `--json` runs without a prompt | spike S6 | spike |
 | Cost | 312 ms CPU p50 per call | spike S5 | spike |

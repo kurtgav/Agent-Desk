@@ -84,15 +84,17 @@ Built from the latest `tool.started` of each agent. Paths are shown relative to 
 
 ## Redaction (applied before insert and before any preview)
 - **OTel identity** is dropped: `user.email`, `user.account_uuid`, `user.account_id`, `organization.id`, `user.id` (spike: present on every signal).
-- **Secrets** are masked in all strings with `•••`:
-  - `(?i)(api[_-]?key|token|secret|passw(or)?d|authorization)\s*[:=]\s*\S+`
-  - `sk-ant-[\w-]+`, `sk-[A-Za-z0-9]{20,}`
-  - `gh[pousr]_[A-Za-z0-9]{36,}`, `github_pat_\w+`
-  - `xox[abprs]-[\w-]+`, `AKIA[0-9A-Z]{16}`
-  - JWTs: `eyJ[\w-]+\.[\w-]+\.[\w-]+`
-  - PEM private keys
-  - credentials in URLs: `\w+://[^:\s/]+:[^@\s]+@` (the password part)
+- **Order (D-061):** drop transcript paths and file bodies, then mask every string, then cap. Masking first means a cap can never cut a secret out of its pattern (M2 security review: a PEM longer than the cap lost its END line and was stored).
+- **Secrets** are masked in all strings with `•••` (`src/collector/redact.ts`; the M2 review's shapes are test cases in `normalize.test.ts`):
+  - `KEY=value`, `key: value`, `"key": "value"` and JSON-escaped `\"key\":\"value\"`, where the key contains `api_key`/`api-key`, `token`, `secret`, `password`/`passwd`, `authorization` or `credential(s)`, with any prefix or suffix (`NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `DB_PASSWORD`). `Authorization: Bearer x` loses `Bearer x`.
+  - `--password x`, `--token x`, `--api-key x`
+  - Any string value under an object key of that shape (`{"password": "p w"}`), whatever its format
+  - Vendor prefixes: `sk-ant-…`, `sk-…`/`sk-proj-…` (20+), Stripe `sk_live_`/`rk_test_…`, `gh[pousr]_…`, `github_pat_…`, `glpat-…`, `npm_…`, `hf_…`, `AIza…`, `xox[abprs]-…`, `AKIA…`, JWTs `eyJ….….…`
+  - PEM private keys, to the END line or to the end of the string
+  - The password in URLs: `://user:pass@`
+- **Limits:** each string is scanned up to its first 16 KB and objects up to 32 levels deep (deeper becomes `<nested too deep>`). Every pattern stays linear on hostile input: a 200 KB run took 45 s with the old URL rule (test "stays linear on hostile input").
 - **Big fields:** `Write.content`, `Edit.old_string` and `Edit.new_string` are replaced by their lengths. `tool_response` is kept up to 2 KB, `prompt` up to 2 KB, `last_assistant_message` up to 8 KB.
+- **Poll rows:** only `pid, cwd, kind, name, status, state, waitingFor, id, sessionId, startedAt` are kept, each string masked; `cwd` is capped at 1 KB and the rest at 200 characters. The row schema is loose, so anything else `claude agents` adds is dropped.
 - **Files whose contents are never previewed:** `.env*`, `*.pem`, `*.key`, `id_rsa*`, `credentials*`. Only the path is shown.
 
 ## Reporter API (`POST /v1/events`)
@@ -102,4 +104,6 @@ Built from the latest `tool.started` of each agent. Paths are shown relative to 
 - Same token and Origin rules as `/hooks`. The reply is `202` with an empty body.
 
 ## Fixtures
-`spikes/fixtures/s1/*.json` holds real 2.1.318 payloads, redacted. `node spikes/check-fixtures.mjs` asserts each one has the fields this table maps from; in M2 the fixtures move to `test/fixtures/hooks/2.1.318/`. Events marked docs-only in COMPATIBILITY.md get hand-written fixtures labelled `docs-derived`.
+`test/fixtures/hooks/2.1.318/*.json` holds the real S1 payloads, redacted, with `_requests.jsonl` giving their delivery order and times (moved from `spikes/fixtures/s1` in M2). `src/collector/normalize.test.ts` asserts each one has the fields this table maps from (it replaced `spikes/check-fixtures.mjs`). Events marked docs-only in COMPATIBILITY.md get hand-written fixtures labelled `docs-derived`.
+
+**Dedupe (D-044, D-056):** the key is the SHA-256 of the raw request body; the field-based key considered earlier collides because TaskCreated and SubagentStart share `prompt_id` in S1. A body seen again **within 2 s** is a redelivery and is skipped (in memory). Later ones are real events: a PermissionRequest has no per-request field, so asking twice for the same command sends the same bytes. The `events.dedupe_key` column from migration 1 is left NULL, since its `UNIQUE` index would reject those repeats. Poll events carry no key.

@@ -16,6 +16,11 @@ M1 needs the Home screen built and matched against the reference before live dat
 ## M1 note (2026-11-05)
 M1 has no collector, so the demo snapshot is built in the renderer from a typed module (D-031) and the app always runs in demo mode. "Demo data" shows as a persistent amber status chip in the top bar instead of a banner, so the layout matches the reference; the window title and tray tooltip read "AgentDeck (Demo)". The switcher's "Demo data" item is checked and disabled until M2 adds live mode, at which point this ADR's collector-side design applies unchanged.
 
+## M2 note (2026-11-05)
+- **Live is the default (D-043).** The switcher's "Demo data" item is a working checkbox. Main persists `demo` in `config.json`, stops or starts the collector, updates the window title and tray tooltip ("AgentDeck (Demo)" / "AgentDeck") and reloads the window into the other mode.
+- Demo data is still the renderer's typed snapshot (D-031). In demo mode **the collector does not run at all**, so no hook, OTLP or poll traffic is accepted and nothing can reach `agentdeck.db`. `tests/live.spec.ts` checks that a live session is still there after a round trip through demo.
+- Replaying fixtures into `demo.db` through the reducers moves to M4, when the list pages need demo history beyond the Home snapshot.
+
 ## Consequences
 - The demo exercises the real pipeline, so the M1 screenshots also smoke-test the reducers.
 - There is no path by which demo rows can enter the live database.
