@@ -39,6 +39,29 @@ export type SessionAction = 'attach' | 'stop' | 'open-folder' | 'open-desktop' |
 export type ActionResult = { ok: true } | { ok: false; error: string }
 export type LogsResult = { ok: true; text: string } | { ok: false; error: string }
 
+/** `claude --effort` levels (`claude --help`); the composer's Max chip cycles through them. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type Effort = (typeof EFFORTS)[number]
+
+/** A subagent definition from `~/.claude/agents` or `<project>/.claude/agents` (sub-agents § Choose the subagent scope). */
+export interface AgentDef {
+  name: string
+  description: string
+  model: string | null
+  scope: 'user' | 'project'
+}
+
+/** The composer's task: `claude --bg --name <auto> [--agent a] --effort e "<prompt>"` in `cwd`. */
+export interface DispatchRequest {
+  prompt: string
+  cwd: string
+  agent: string | null
+  effort: Effort
+}
+
+/** `untrusted`: the folder needs `claude` run there once to accept the trust prompt (S6). */
+export type DispatchResult = { ok: true; name: string; bgId: string | null } | { ok: false; error: string; untrusted: boolean }
+
 export interface AgentDeckBridge {
   getAppInfo(): Promise<AppInfo>
   /** The latest live snapshot, or null before the collector's first one (and always in demo). */
@@ -68,6 +91,14 @@ export interface AgentDeckBridge {
   logs(sessionId: string): Promise<LogsResult>
   /** `code -g <path>` for a file an agent changed. */
   openFile(path: string): Promise<ActionResult>
+  /** Starts a background session. `cwd` must be a project AgentDeck saw a session in, or one picked with chooseFolder. */
+  dispatch(req: DispatchRequest): Promise<DispatchResult>
+  /** The folder picker behind Browse…; null when cancelled. */
+  chooseFolder(): Promise<string | null>
+  /** Opens `claude` in that folder in a terminal window, so the user can accept its trust prompt. */
+  runClaudeIn(cwd: string): Promise<ActionResult>
+  /** User subagents, plus that project's when `cwd` is given; project ones win on a name clash. */
+  listAgents(cwd: string | null): Promise<AgentDef[]>
 }
 
 export const IPC = {
@@ -87,5 +118,9 @@ export const IPC = {
   detail: 'session:detail',
   act: 'session:act',
   logs: 'session:logs',
-  openFile: 'file:open'
+  openFile: 'file:open',
+  dispatch: 'composer:dispatch',
+  chooseFolder: 'composer:choose-folder',
+  runClaudeIn: 'composer:run-claude-in',
+  listAgents: 'composer:agents'
 } as const

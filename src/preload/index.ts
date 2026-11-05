@@ -26,7 +26,11 @@ const bridge: AgentDeckBridge = {
   getDetail: (sessionId) => ipcRenderer.invoke(IPC.detail, sessionId),
   act: (action, sessionId) => ipcRenderer.invoke(IPC.act, action, sessionId),
   logs: (sessionId) => ipcRenderer.invoke(IPC.logs, sessionId),
-  openFile: (path) => ipcRenderer.invoke(IPC.openFile, path)
+  openFile: (path) => ipcRenderer.invoke(IPC.openFile, path),
+  dispatch: (req) => ipcRenderer.invoke(IPC.dispatch, req),
+  chooseFolder: () => ipcRenderer.invoke(IPC.chooseFolder),
+  runClaudeIn: (cwd) => ipcRenderer.invoke(IPC.runClaudeIn, cwd),
+  listAgents: (cwd) => ipcRenderer.invoke(IPC.listAgents, cwd)
 }
 
 contextBridge.exposeInMainWorld('agentdeck', bridge)

@@ -1,17 +1,23 @@
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { app, clipboard, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type Tray } from 'electron'
+import {
+  app, clipboard, dialog, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type OpenDialogOptions, type Tray
+} from 'electron'
 import { z } from 'zod'
-import { IPC, type ActionResult, type AppInfo, type AppStatus, type HooksPreview, type HooksResult } from '@shared/bridge'
+import {
+  EFFORTS, IPC, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult
+} from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
 import type { SessionDetail } from '@shared/detail'
 import type { Session, Snapshot } from '@shared/snapshot'
 import { resolveClaude } from '../collector/cli'
-import { act, logs, openFile, type ActionDeps } from './actions'
+import { act, LOCAL_PATH, logs, openFile, runClaudeIn, type ActionDeps } from './actions'
+import { agentList } from './agents'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, updateConfig } from './config'
+import { PROMPT_MAX, dispatch, knownFolder } from './dispatch'
 import { SHAPE, hooksState, install, previewInstall, previewUninstall, uninstall, type HookPaths } from './hooks'
 import { settingsPath, type HookTarget } from './hooks-install'
 import { isPaused, notifyPrefs, tomorrowMorning, type NotifyPrefs } from './notify'
@@ -197,6 +203,56 @@ const UNKNOWN: ActionResult = { ok: false, error: 'AgentDeck does not know this 
 /** The renderer already runs nothing in demo (D-094); main refuses too, in case it is asked anyway. */
 const DEMO_REFUSED: ActionResult = { ok: false, error: 'Demo data: nothing was run.' }
 
+// ── Composer (brief § Composer) ──
+
+const configDir = (): string => process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+/** Folders picked with Browse… during this run. Dispatch also takes any folder a listed session runs in. */
+const picked = new Set<string>()
+const knownFolders = (): string[] => [...picked, ...(latest?.sessions.map((s) => s.cwd) ?? [])]
+const Folder = z.string().min(3).max(1024)
+
+async function agentsFor(cwd: string | null): Promise<AgentDef[]> {
+  if (demo) return []
+  const project = cwd && (await knownFolder(cwd, knownFolders())) ? join(cwd, '.claude', 'agents') : null
+  return agentList(join(configDir(), 'agents'), project)
+}
+
+const Dispatch = z.object({
+  prompt: z.string().trim().min(1).max(PROMPT_MAX),
+  cwd: Folder,
+  agent: z.string().min(1).max(64).nullable(),
+  effort: z.enum(EFFORTS)
+})
+const refused = (error: string): DispatchResult => ({ ok: false, error, untrusted: false })
+const NOT_KNOWN = 'AgentDeck runs tasks only in a project it has seen a session in, or a folder you picked with Browse….'
+const NOT_LOCAL = 'AgentDeck runs tasks only in folders on a local drive.'
+
+/** The folder and the subagent are checked here, not trusted from the page (ADR-0010). */
+async function onDispatch(raw: unknown): Promise<DispatchResult> {
+  if (demo) return refused('Demo data: nothing was dispatched.')
+  const req = Dispatch.parse(raw)
+  if (!LOCAL_PATH.test(req.cwd)) return refused(NOT_LOCAL)
+  if (!(await knownFolder(req.cwd, knownFolders()))) return refused(NOT_KNOWN)
+  if (req.agent && !(await agentsFor(req.cwd)).some((a) => a.name === req.agent)) return refused(`There is no subagent named ${req.agent} for this project.`)
+  return dispatch(req, actionDeps)
+}
+
+async function onChooseFolder(): Promise<string | null> {
+  if (demo) return null
+  const opts: OpenDialogOptions = { title: 'Run the task in this folder', properties: ['openDirectory'] }
+  const r = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  const dir = r.canceled ? undefined : r.filePaths[0]
+  if (!dir) return null
+  picked.add(dir)
+  return dir
+}
+
+async function onRunClaudeIn(cwd: unknown): Promise<ActionResult> {
+  if (demo) return DEMO_REFUSED
+  const dir = Folder.parse(cwd)
+  return (await knownFolder(dir, knownFolders())) ? runClaudeIn(dir, actionDeps) : { ok: false, error: NOT_KNOWN }
+}
+
 /** Only our own page may call into main (ADR-0010). */
 function fromApp(e: IpcMainInvokeEvent): boolean {
   const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
@@ -225,7 +281,6 @@ function hookToken(): string {
 
 function startCollector(): void {
   const config = readConfig(configFile())
-  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   collector = superviseCollector(
     COLLECTOR_ENTRY,
     {
@@ -233,7 +288,7 @@ function startCollector(): void {
       dbPath: join(app.getPath('userData'), 'agentdeck.db'),
       token: hookToken(),
       ports: PORTS,
-      agentsDir: join(configDir, 'agents'),
+      agentsDir: join(configDir(), 'agents'),
       // AGENTDECK_POLL=0: smoke tests must not list the real sessions on the machine running them.
       claude: process.env.AGENTDECK_POLL === '0' ? false : typeof config.claudePath === 'string' ? config.claudePath : undefined
     },
@@ -362,6 +417,10 @@ function start(): void {
     return s ? logs(s, actionDeps) : UNKNOWN
   })
   handle(IPC.openFile, (_e, path) => (demo ? DEMO_REFUSED : openFile(z.string().min(3).max(1024).parse(path))))
+  handle(IPC.dispatch, (_e, req) => onDispatch(req))
+  handle(IPC.chooseFolder, onChooseFolder)
+  handle(IPC.runClaudeIn, (_e, cwd) => onRunClaudeIn(cwd))
+  handle(IPC.listAgents, (_e, cwd) => agentsFor(Folder.nullable().parse(cwd)))
   registerAutostartOnce(configFile())
 
   win = newWindow(process.argv.includes('--hidden'))

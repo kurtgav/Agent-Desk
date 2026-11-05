@@ -79,7 +79,11 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
       getDetail: async () => null,
       act: async () => ({ ok: true }),
       logs: async () => ({ ok: true, text: '' }),
-      openFile: async () => ({ ok: true })
+      openFile: async () => ({ ok: true }),
+      dispatch: async () => ({ ok: true, name: 'task-0000', bgId: null }),
+      chooseFolder: async () => null,
+      runClaudeIn: async () => ({ ok: true }),
+      listAgents: async () => []
     }
     vi.stubGlobal('window', { agentdeck: bridge })
     return Object.assign((s: Snapshot | null) => push(s), { bridge })
