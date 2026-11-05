@@ -68,13 +68,13 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 | "Tuesday, November 3" | local date | `Intl.DateTimeFormat` |
 | "Good morning, Maya" | "Good morning/afternoon/evening, Kurt" | local hour |
 | "3 things need your OK. Agents finished 6 tasks overnight." | live summary | "{P1 count} things need your OK" (omitted at 0) + "Agents finished {n} tasks while you were away" (since the window last had focus, D-007); fallback "All quiet." |
-| Composer "Ask your agents to…" | dispatch composer | `claude --bg --name <auto> [--agent a] [--model m] [--effort e] "<prompt>"` via cross-spawn, arg array, cwd = chosen project. Errors are shown inline; `Workspace not trusted` → "Open a terminal in <folder> and run `claude` once to trust it" + button that opens a terminal there |
-| + | project picker | recent cwds + Browse… |
-| @ | subagent mention | inserts `--agent` choice |
+| Composer "Ask your agents to…" | dispatch composer | `claude --bg --name <auto> [--agent a] --effort e "<prompt>"` via cross-spawn, arg array, cwd = chosen project (D-098). Enter sends, Shift+Enter is a new line. Success clears the text and shows "Started <name> in <project>."; other errors show in the notice. `Workspace not trusted` shows the CLI's own sentence inline with **Run claude there**, which opens `claude` in that folder in a terminal so its trust prompt can be accepted (D-100). No model control (D-098) |
+| + | project picker | recent session cwds + Browse… (a folder dialog; the pick counts for this run, D-099) |
+| @ | subagent mention | search picker; inserts `@agent-<name> ` at the caret (D-102) |
 | mic | **dropped** | no data/action |
-| Agent ▾ | subagent picker | sets `--agent` |
+| Agent ▾ | subagent picker | search picker over `~/.claude/agents` + the project's `.claude/agents`, project wins (D-101); sets `--agent`, or Default |
 | ⚡ Max chip | effort chip | cycles low, medium, high, xhigh, max → `--effort` |
-| ↑ send | send | dispatch; disabled while prompt empty or no project |
+| ↑ send | send | dispatch; `aria-disabled` with the reason as its tooltip while the prompt is empty, no project is chosen, or a dispatch is starting |
 
 ## KPI cards
 | Reference | AgentDeck | Definition |

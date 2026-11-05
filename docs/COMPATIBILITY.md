@@ -55,7 +55,10 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | `Workspace not trusted. Run \`claude\` in <path> once and accept the trust prompt, then retry.` (exit 1) | errors index, spike S6 | spike |
 | `claude logs <id>` (ANSI screen dump) | cli-reference | spike S7 |
 | `claude stop|kill <id>`, `claude rm <id>` | cli-reference | spike S7 |
-| `claude attach <id|name>` ("Open the background session in this terminal") | cli-reference, `claude attach --help` | docs (help text); a real attach is still to run by hand |
+| `claude attach <id|name>` ("Open the background session in this terminal") | cli-reference, `claude attach --help` | docs (help text); a real attach is still to run by hand. The console window it opens in without Windows Terminal was probed (D-095) |
+| `--agent <name>` takes built-in and custom subagents | sub-agents § Invoke subagents explicitly (page summary) | docs (summary, not verbatim) |
+| `@agent-<name>` in a prompt invokes that subagent | sub-agents § Invoke subagents explicitly (page summary) | **unverified**: run one mention by hand |
+| Project `.claude/agents` beats `~/.claude/agents` on a name clash | sub-agents § Choose the subagent scope | docs |
 | `claude respawn <id>` | cli-reference | docs (not used) |
 | `--effort` ∈ low, medium, high, xhigh, max (+ `ultracode`) | `claude --help`, cli-reference | docs |
 | `claude --resume <sessionId>` | sessions § Resume by session ID | docs |
