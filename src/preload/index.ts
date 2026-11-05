@@ -22,7 +22,11 @@ const bridge: AgentDeckBridge = {
   previewInstall: () => ipcRenderer.invoke(IPC.previewInstall),
   previewUninstall: () => ipcRenderer.invoke(IPC.previewUninstall),
   installHooks: () => ipcRenderer.invoke(IPC.install),
-  uninstallHooks: () => ipcRenderer.invoke(IPC.uninstall)
+  uninstallHooks: () => ipcRenderer.invoke(IPC.uninstall),
+  getDetail: (sessionId) => ipcRenderer.invoke(IPC.detail, sessionId),
+  act: (action, sessionId) => ipcRenderer.invoke(IPC.act, action, sessionId),
+  logs: (sessionId) => ipcRenderer.invoke(IPC.logs, sessionId),
+  openFile: (path) => ipcRenderer.invoke(IPC.openFile, path)
 }
 
 contextBridge.exposeInMainWorld('agentdeck', bridge)

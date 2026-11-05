@@ -1,3 +1,4 @@
+import type { SessionDetail } from './detail'
 import type { Snapshot } from './snapshot'
 
 /** What the preload exposes on `window.agentdeck` (ADR-0010: no Node in the renderer). */
@@ -32,6 +33,12 @@ export type HooksResult = { ok: true } | { ok: false; error: string }
 
 export type PauseChoice = 'hour' | 'tomorrow'
 
+/** Session drawer actions (UI_MAP § Session drawer). Main looks the session up itself; the renderer sends only its id. */
+export type SessionAction = 'attach' | 'stop' | 'open-folder' | 'open-desktop' | 'copy-resume'
+
+export type ActionResult = { ok: true } | { ok: false; error: string }
+export type LogsResult = { ok: true; text: string } | { ok: false; error: string }
+
 export interface AgentDeckBridge {
   getAppInfo(): Promise<AppInfo>
   /** The latest live snapshot, or null before the collector's first one (and always in demo). */
@@ -53,6 +60,14 @@ export interface AgentDeckBridge {
   /** Writes settings.json; the renderer calls these only after the user confirmed the preview's diff. */
   installHooks(): Promise<HooksResult>
   uninstallHooks(): Promise<HooksResult>
+  /** The drawer's data, or null when the collector doesn't know the session (or isn't running). */
+  getDetail(sessionId: string): Promise<SessionDetail | null>
+  /** Stop is only sent after the user confirmed it in the window. */
+  act(action: SessionAction, sessionId: string): Promise<ActionResult>
+  /** `claude logs <id>` of a background session, ANSI codes removed. */
+  logs(sessionId: string): Promise<LogsResult>
+  /** `code -g <path>` for a file an agent changed. */
+  openFile(path: string): Promise<ActionResult>
 }
 
 export const IPC = {
@@ -68,5 +83,9 @@ export const IPC = {
   previewInstall: 'hooks:preview-install',
   previewUninstall: 'hooks:preview-uninstall',
   install: 'hooks:install',
-  uninstall: 'hooks:uninstall'
+  uninstall: 'hooks:uninstall',
+  detail: 'session:detail',
+  act: 'session:act',
+  logs: 'session:logs',
+  openFile: 'file:open'
 } as const

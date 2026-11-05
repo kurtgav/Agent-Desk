@@ -9,7 +9,11 @@ const MAX_OUTPUT = 8 * 1024 * 1024
 export interface RunResult {
   code: number | null
   stdout: string
+  /** Where the CLI prints its errors, e.g. `Workspace not trusted` (S6). Capped like stdout. */
+  stderr: string
 }
+
+const FAILED: RunResult = { code: null, stdout: '', stderr: '' }
 
 /**
  * D-025: a spawned `claude` must not think it is a child of another session (F8), so every CLAUDE* variable goes,
@@ -33,10 +37,17 @@ export function system32(...parts: string[]): string {
  * Argument array, no shell, hidden window, hard timeout (ADR-0008).
  * A timeout settles at once: killing a `.cmd` shim ends cmd.exe, but its child can keep the pipe (and `close`) open.
  */
-export function run(file: string, args: readonly string[], timeoutMs: number, env: NodeJS.ProcessEnv = cleanEnv()): Promise<RunResult> {
+export function run(
+  file: string,
+  args: readonly string[],
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = cleanEnv(),
+  cwd?: string
+): Promise<RunResult> {
   return new Promise((resolve) => {
-    const child = spawn(file, [...args], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
-    const chunks: Buffer[] = []
+    const child = spawn(file, [...args], { env, cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const out: Buffer[] = []
+    const err: Buffer[] = []
     let size = 0
     let settled = false
     const settle = (r: RunResult): void => {
@@ -47,16 +58,35 @@ export function run(file: string, args: readonly string[], timeoutMs: number, en
     }
     const abort = (): void => {
       child.kill()
-      settle({ code: null, stdout: '' })
+      settle(FAILED)
     }
     const timer = setTimeout(abort, timeoutMs)
-    child.stdout?.on('data', (c: Buffer) => {
+    const collect = (into: Buffer[]) => (c: Buffer) => {
       size += c.length
-      if (size <= MAX_OUTPUT) chunks.push(c)
+      if (size <= MAX_OUTPUT) into.push(c)
       else abort()
+    }
+    child.stdout?.on('data', collect(out))
+    child.stderr?.on('data', collect(err))
+    child.on('error', () => settle(FAILED))
+    child.on('close', (code) => settle({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }))
+  })
+}
+
+/**
+ * Starts a program that outlives AgentDeck in its own window (Attach, a terminal, VS Code), argument array, no shell
+ * (ADR-0008). Resolves once Windows started it, or with the reason it could not.
+ */
+export function launch(file: string, args: readonly string[], opts: { cwd?: string; hide: boolean; env?: NodeJS.ProcessEnv }): Promise<string | null> {
+  // cross-spawn runs a path it can't resolve through cmd.exe, which starts fine and fails later, after we let go.
+  if (!existsSync(file)) return Promise.resolve(`${file} was not found`)
+  return new Promise((resolve) => {
+    const child = spawn(file, [...args], { cwd: opts.cwd, env: opts.env ?? cleanEnv(), detached: true, stdio: 'ignore', windowsHide: opts.hide })
+    child.once('spawn', () => {
+      child.unref()
+      resolve(null)
     })
-    child.on('error', () => settle({ code: null, stdout: '' }))
-    child.on('close', (code) => settle({ code, stdout: Buffer.concat(chunks).toString('utf8') }))
+    child.once('error', (e) => resolve(e.message))
   })
 }
 
@@ -70,11 +100,16 @@ export async function isClaudeCli(file: string): Promise<boolean> {
   return code === 0 && VERSION_RE.test(stdout.trim())
 }
 
+/** Every match of `where.exe <name>` on PATH, in order; none when it isn't there. */
+export async function which(name: string): Promise<string[]> {
+  const r = await run(system32('where.exe'), [name], VERSION_TIMEOUT_MS)
+  return r.code === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
+}
+
 /** D-024: Settings override → ~/.local/bin/claude.exe → `where claude` (minus Desktop paths) → npm global shim. */
 export async function resolveClaude(override: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   const home = env.USERPROFILE ?? ''
-  const where = await run(system32('where.exe'), ['claude'], VERSION_TIMEOUT_MS)
-  const found = where.code === 0 ? where.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
+  const found = await which('claude')
   const candidates = [
     override,
     home && join(home, '.local', 'bin', 'claude.exe'),

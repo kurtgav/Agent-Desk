@@ -89,7 +89,7 @@ describe('Poller cadence (D-005, ADR-0004)', () => {
     poller = new Poller({
       list: async () => {
         polls.push(Date.now())
-        return output === null ? { code: 1, stdout: '' } : { code: 0, stdout: output }
+        return output === null ? { code: 1, stdout: '', stderr: '' } : { code: 0, stdout: output, stderr: '' }
       },
       exePaths: async (pids) => new Map(pids.map((p) => [p, null])),
       emit: (e) => emitted.push(e)
@@ -127,7 +127,7 @@ describe('Poller cadence (D-005, ADR-0004)', () => {
   it('ends sessions the store still thought live when the first poll does not list them (D-057)', async () => {
     poller.stop()
     poller = new Poller(
-      { list: async () => ({ code: 0, stdout: output! }), exePaths: async () => new Map(), emit: (e) => emitted.push(e) },
+      { list: async () => ({ code: 0, stdout: output!, stderr: '' }), exePaths: async () => new Map(), emit: (e) => emitted.push(e) },
       ['s1', 'gone-while-closed']
     )
     poller.start()
@@ -140,7 +140,7 @@ describe('Poller cadence (D-005, ADR-0004)', () => {
     const lookups: number[] = []
     let fail = true
     poller = new Poller({
-      list: async () => ({ code: 0, stdout: output! }),
+      list: async () => ({ code: 0, stdout: output!, stderr: '' }),
       exePaths: async (pids) => {
         lookups.push(Date.now() - 1_000_000)
         return fail ? null : new Map(pids.map((p) => [p, 'C:\\Users\\k\\AppData\\Local\\Claude-Data\\claude.exe']))
@@ -158,13 +158,13 @@ describe('Poller cadence (D-005, ADR-0004)', () => {
   })
 
   it('emits nothing once stopped, even from a poll already in flight', async () => {
-    let release: (v: { code: number; stdout: string }) => void = () => undefined
+    let release: (v: { code: number; stdout: string; stderr: string }) => void = () => undefined
     poller.stop()
     poller = new Poller({ list: () => new Promise((r) => (release = r)), exePaths: async () => new Map(), emit: (e) => emitted.push(e) })
     poller.start()
     await vi.advanceTimersByTimeAsync(0)
     poller.stop()
-    release({ code: 0, stdout: output! })
+    release({ code: 0, stdout: output!, stderr: '' })
     await vi.advanceTimersByTimeAsync(0)
     expect(emitted).toEqual([])
   })

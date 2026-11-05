@@ -1,11 +1,14 @@
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { app, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type Tray } from 'electron'
+import { app, clipboard, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type Tray } from 'electron'
 import { z } from 'zod'
-import { IPC, type AppInfo, type AppStatus, type HooksPreview, type HooksResult } from '@shared/bridge'
+import { IPC, type ActionResult, type AppInfo, type AppStatus, type HooksPreview, type HooksResult } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
-import type { Snapshot } from '@shared/snapshot'
+import type { SessionDetail } from '@shared/detail'
+import type { Session, Snapshot } from '@shared/snapshot'
+import { resolveClaude } from '../collector/cli'
+import { act, logs, openFile, type ActionDeps } from './actions'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, updateConfig } from './config'
@@ -161,6 +164,37 @@ function focusItem(id: string): void {
   else send()
 }
 
+// ── Session actions (UI_MAP § Session drawer) ──
+
+let claudeCli: Promise<string | null> | null = null
+const actionDeps: ActionDeps = {
+  // Resolved once (ADR-0008); a miss is retried on the next action, so installing Claude Code needs no restart.
+  claude: () => {
+    const override = readConfig(configFile()).claudePath
+    claudeCli ??= resolveClaude(typeof override === 'string' ? override : undefined).then((p) => {
+      if (!p) claudeCli = null
+      return p
+    })
+    return claudeCli
+  },
+  copy: (text) => clipboard.writeText(text)
+}
+
+const SessionId = z.string().min(1).max(128)
+
+async function detail(sessionId: string): Promise<SessionDetail | null> {
+  if (demo || !collector) return null
+  const m = await collector.request((reqId) => ({ type: 'detail', reqId, sessionId }))
+  return m?.type === 'detail' ? m.detail : null
+}
+
+/** The session as the collector knows it: cwd and ids never come from the renderer. */
+async function sessionFor(id: string): Promise<Session | null> {
+  return latest?.sessions.find((s) => s.id === id) ?? (await detail(id))?.session ?? null
+}
+
+const UNKNOWN: ActionResult = { ok: false, error: 'AgentDeck does not know this session (any more).' }
+
 /** Only our own page may call into main (ADR-0010). */
 function fromApp(e: IpcMainInvokeEvent): boolean {
   const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
@@ -225,7 +259,7 @@ function onCollectorMessage(m: FromCollector): void {
     latest = m.snapshot
     if (win && !win.isDestroyed()) win.webContents.send(IPC.snapshotPush, m.snapshot)
     signals.update(m.snapshot)
-  } else {
+  } else if (m.type === 'error') {
     console.error(`[collector] ${m.message}`)
   }
 }
@@ -316,6 +350,16 @@ function start(): void {
   handle(IPC.previewUninstall, () => previewUninstall(hookPaths()))
   handle(IPC.install, onInstall)
   handle(IPC.uninstall, onUninstall)
+  handle(IPC.detail, (_e, id) => detail(SessionId.parse(id)))
+  handle(IPC.act, async (_e, action, id) => {
+    const s = await sessionFor(SessionId.parse(id))
+    return s ? act(z.enum(['attach', 'stop', 'open-folder', 'open-desktop', 'copy-resume']).parse(action), s, actionDeps) : UNKNOWN
+  })
+  handle(IPC.logs, async (_e, id) => {
+    const s = await sessionFor(SessionId.parse(id))
+    return s ? logs(s, actionDeps) : UNKNOWN
+  })
+  handle(IPC.openFile, (_e, path) => openFile(z.string().min(3).max(1024).parse(path)))
   registerAutostartOnce(configFile())
 
   win = newWindow(process.argv.includes('--hidden'))

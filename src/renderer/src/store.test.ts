@@ -75,7 +75,11 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
       previewInstall: async () => ({ ok: false, path: '', error: 'x' }),
       previewUninstall: async () => ({ ok: false, path: '', error: 'x' }),
       installHooks: async () => ({ ok: true }),
-      uninstallHooks: async () => ({ ok: true })
+      uninstallHooks: async () => ({ ok: true }),
+      getDetail: async () => null,
+      act: async () => ({ ok: true }),
+      logs: async () => ({ ok: true, text: '' }),
+      openFile: async () => ({ ok: true })
     }
     vi.stubGlobal('window', { agentdeck: bridge })
     return Object.assign((s: Snapshot | null) => push(s), { bridge })
