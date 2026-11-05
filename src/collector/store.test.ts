@@ -37,7 +37,10 @@ describe('Store', () => {
     store.ingest(s1())
     const snap = store.snapshot(lastTs(), EXTRAS)
     expect(() => Snapshot.parse(snap)).not.toThrow()
-    expect(snap).toMatchObject({ mode: 'live', attention: [], usage: null, agentDefinitionCount: 3 })
+    expect(snap).toMatchObject({ mode: 'live', usage: null, agentDefinitionCount: 3 })
+    // Every approval was answered; what's left are the finished `-p` runs to review (they end with reason "other").
+    expect(snap.attention.length).toBeGreaterThan(0)
+    expect(snap.attention.every((i) => i.kind === 'review' && i.priority === 4)).toBe(true)
     expect(snap.files.map((f) => f.path.split('\\').pop())).toEqual(['hello.txt'])
     expect(snap.week.finishedTurns).toHaveLength(6)
     expect(snap.recentAgentTypes).toEqual(['Explore']) // not the main thread's settings `agent` type
@@ -99,7 +102,7 @@ describe('Store', () => {
     store.ingest(s1())
     const db = new DatabaseSync(file)
     const count = (table: string) => Number((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n)
-    const tables = ['events', 'sessions', 'work_spans', 'finished_turns', 'files']
+    const tables = ['events', 'sessions', 'work_spans', 'finished_turns', 'files', 'attention_items']
     for (const t of tables) expect(count(t), t).toBeGreaterThan(0)
     const later = lastTs() + RETENTION_MS + 1
     store.prune(later)
@@ -107,7 +110,63 @@ describe('Store', () => {
     db.close()
     // Memory too: the same instance, asked about the time the rows were made, has nothing left.
     const snap = store.snapshot(lastTs(), EXTRAS)
-    expect([snap.sessions, snap.files, snap.week.finishedTurns, snap.week.agentTimeMs]).toEqual([[], [], [], 0])
+    expect([snap.sessions, snap.files, snap.week.finishedTurns, snap.week.agentTimeMs, snap.attention]).toEqual([[], [], [], 0, []])
+  })
+
+  describe('attention (ADR-0013)', () => {
+    const t0 = Date.UTC(2026, 10, 5, 12)
+    const hook = (kind: string, ts: number, extra: Record<string, unknown> = {}) =>
+      normalizeHook(JSON.stringify({ session_id: 'a', hook_event_name: kind, cwd: 'D:\\p', ...extra }), ts)!
+    const pre = { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'git push --force' } }
+    const ask = (store: Store) =>
+      store.ingest([hook('UserPromptSubmit', t0, { prompt: 'go' }), hook('PreToolUse', t0 + 100, pre), hook('PermissionRequest', t0 + 200, { tool_name: 'Bash', tool_input: pre.tool_input })])
+
+    it('opens an approval with the exact command, and clears it on the PostToolUse', () => {
+      const store = open(':memory:')
+      ask(store)
+      expect(store.snapshot(t0 + 200, EXTRAS).attention).toEqual([
+        expect.objectContaining({ priority: 1, kind: 'approval', title: 'Run `git push --force`', riskFlags: ['Force push'], sessionId: 'a' })
+      ])
+      expect(store.fastPollUntil()).toBeGreaterThan(t0 + 200)
+      store.ingest([hook('PostToolUse', t0 + 900, pre)])
+      expect(store.snapshot(t0 + 900, EXTRAS).attention).toEqual([])
+      expect(store.fastPollUntil()).toBe(0)
+    })
+
+    it('keeps open items across a restart, and records how each one closed', () => {
+      const file = tempDb()
+      const first = open(file)
+      ask(first)
+      first.close()
+      stores.pop()
+      const again = open(file, t0 + 1_000)
+      expect(again.snapshot(t0 + 1_000, EXTRAS).attention).toHaveLength(1)
+      again.ingest([hook('PostToolUse', t0 + 1_100, pre)])
+      const db = new DatabaseSync(file)
+      expect(db.prepare('SELECT state, resolved_at, resolved_by FROM attention_items').all()).toEqual([
+        { state: 'resolved', resolved_at: t0 + 1_100, resolved_by: 'hook' }
+      ])
+      db.close()
+    })
+
+    it('dismisses a P4, refuses a P1, and ticks P3 on a timer', () => {
+      const store = open(':memory:')
+      store.ingest([hook('UserPromptSubmit', t0, { prompt: 'go' }), hook('Stop', t0 + 100, { stop_hook_active: false, last_assistant_message: 'Done.' })])
+      const review = store.snapshot(t0 + 100, EXTRAS).attention[0]!
+      expect(store.dismiss(review.id, t0 + 200)).toBe(true)
+      expect(store.snapshot(t0 + 200, EXTRAS).attention).toEqual([])
+
+      const p1 = open(':memory:')
+      ask(p1)
+      const approval = p1.snapshot(t0 + 300, EXTRAS).attention[0]!
+      expect(p1.dismiss(approval.id, t0 + 300)).toBe(false)
+
+      const cfg = { idleMs: 60_000, toolMs: 60_000 }
+      expect(p1.tick(t0 + 30_000, cfg)).toBe(false)
+      p1.ingest([hook('PostToolUse', t0 + 400, pre)])
+      expect(p1.tick(t0 + 400 + 60_001, cfg)).toBe(true) // working, nothing in flight, quiet for over N
+      expect(p1.snapshot(t0 + 400 + 60_001, EXTRAS).attention).toEqual([expect.objectContaining({ priority: 3, kind: 'stuck' })])
+    })
   })
 
   it('ends a working stretch at its last event across a restart, not at the next launch (D-057)', () => {

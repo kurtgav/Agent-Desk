@@ -9,12 +9,16 @@ export interface CollectorInit {
   agentsDir: string | null
   /** CLI path override; false turns the poller off. */
   claude: string | undefined | false
+  /** P3 thresholds N and M in ms (STATE_MACHINE § 3); defaults 5 and 10 min. */
+  stall?: { idleMs: number; toolMs: number }
 }
 
 export type ToCollector =
   | CollectorInit
   | { type: 'visible'; visible: boolean }
   | { type: 'focus'; focused: boolean; at: number }
+  /** The user dismissed a P2–P4 item in the window. */
+  | { type: 'dismiss'; id: string }
 
 export type FromCollector =
   | { type: 'ready'; port: number }

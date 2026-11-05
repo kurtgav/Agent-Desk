@@ -15,6 +15,8 @@ export interface Inflight {
   toolName: string
   input: unknown
   summary: string
+  /** For the "one tool running > M min" stall rule (STATE_MACHINE § 3 P3). Absent in pre-M3 rows. */
+  startedAt?: number
 }
 
 export interface AgentRun {
@@ -214,7 +216,9 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
       break
     case 'tool.started': {
       if (ev.toolUseId && ev.toolName && !s.inflight.some((t) => t.toolUseId === ev.toolUseId)) {
-        const call: Inflight = { toolUseId: ev.toolUseId, agentId: ev.agentId, toolName: ev.toolName, input: p.tool_input, summary: ev.summary }
+        const call: Inflight = {
+          toolUseId: ev.toolUseId, agentId: ev.agentId, toolName: ev.toolName, input: p.tool_input, summary: ev.summary, startedAt: ev.ts
+        }
         s = { ...s, inflight: [...s.inflight, call] }
       }
       if (main) {

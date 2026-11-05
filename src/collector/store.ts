@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { pathKey } from '@shared/paths'
 import type { ChangedFile, Snapshot } from '@shared/snapshot'
+import {
+  attend, dismiss, emptyAttention, fastPollUntil, stall, toItem, type AttentionRecord, type AttentionState, type Attended, type StallConfig
+} from './attention'
 import type { AgentEvent } from './events'
 import { closeStale, correlate, duePoll, reduceSession, toSession, type SessionState } from './reduce'
 
@@ -30,7 +33,20 @@ const MIGRATIONS = [
    CREATE TABLE finished_turns (session_id TEXT NOT NULL, ts INTEGER NOT NULL);
    CREATE INDEX finished_turns_ts ON finished_turns(ts);
    CREATE TABLE files (path_key TEXT NOT NULL, path TEXT NOT NULL, session_id TEXT NOT NULL, tool TEXT NOT NULL, changed_at INTEGER NOT NULL);
-   CREATE INDEX files_changed_at ON files(changed_at);`
+   CREATE INDEX files_changed_at ON files(changed_at);`,
+  // M3: the attention engine's output (ADR-0013). `data` is the AttentionRecord as JSON; the columns are for queries and Diagnostics.
+  `CREATE TABLE attention_items (
+     id TEXT PRIMARY KEY,
+     session_id TEXT NOT NULL,
+     key TEXT NOT NULL,
+     state TEXT NOT NULL,
+     opened_at INTEGER NOT NULL,
+     resolved_at INTEGER,
+     resolved_by TEXT,
+     data TEXT NOT NULL
+   );
+   CREATE INDEX attention_items_state ON attention_items(state);
+   CREATE INDEX attention_items_opened ON attention_items(opened_at);`
 ]
 
 const DAY_MS = 86_400_000
@@ -83,6 +99,7 @@ export class Store {
   private readonly agentTypes = new Map<string, number>()
   /** dedupeKey → arrival, oldest first (D-056). */
   private readonly recent = new Map<string, number>()
+  private attention: AttentionState = emptyAttention()
 
   constructor(file: string, now = Date.now()) {
     this.db = new DatabaseSync(file)
@@ -124,6 +141,8 @@ export class Store {
       this.sessions.set(s.id, s)
     }
     this.closeStaleSessions()
+    const open = this.db.prepare("SELECT data FROM attention_items WHERE state = 'open' ORDER BY opened_at").all()
+    this.attention = { open: open.map((r) => JSON.parse(String(r.data)) as AttentionRecord), quiet: {} }
     this.spans = this.db
       .prepare('SELECT session_id, start_ts, end_ts FROM work_spans WHERE end_ts >= ?')
       .all(since)
@@ -172,6 +191,41 @@ export class Store {
     return [...this.sessions.values()].flatMap((s) => duePoll(s, now) ?? [])
   }
 
+  /** Writes what the attention engine opened and closed; call inside a transaction. */
+  private saveAttention(a: Attended): void {
+    if (a.opened.length) {
+      const insert = this.db.prepare('INSERT INTO attention_items (id, session_id, key, state, opened_at, data) VALUES (?, ?, ?, ?, ?, ?)')
+      for (const i of a.opened) insert.run(i.id, i.sessionId, i.key, 'open', i.openedAt, JSON.stringify(i))
+    }
+    if (a.closed.length) {
+      const update = this.db.prepare('UPDATE attention_items SET state = ?, resolved_at = ?, resolved_by = ? WHERE id = ?')
+      for (const c of a.closed) update.run(c.state, c.at, c.by, c.item.id)
+    }
+  }
+
+  /** P3 stall rules, on the collector's timer. Returns whether an item opened. */
+  tick(now: number, cfg?: StallConfig): boolean {
+    const a = stall(this.attention, this.sessions.values(), now, cfg)
+    if (!a.opened.length) return false
+    this.tx(() => this.saveAttention(a))
+    this.attention = a.state
+    return true
+  }
+
+  /** User Dismiss from the window (P2–P4). Returns whether an item closed. */
+  dismiss(id: string, now: number, cfg?: StallConfig): boolean {
+    const a = dismiss(this.attention, id, now, cfg)
+    if (!a.closed.length) return false
+    this.tx(() => this.saveAttention(a))
+    this.attention = a.state
+    return true
+  }
+
+  /** The 1 s poll runs until this time (0 = never), while a P1 item is open. */
+  fastPollUntil(): number {
+    return fastPollUntil(this.attention)
+  }
+
   /** D-056. Forgets keys older than the window, then reports whether this one was seen inside it. */
   private repeated(ev: AgentEvent): boolean {
     for (const [k, at] of this.recent) {
@@ -209,6 +263,7 @@ export class Store {
     const finished: number[] = []
     const files: ChangedFile[] = []
     const agentTypes: [string, number][] = []
+    let attention = this.attention
 
     this.tx(() => {
       for (const raw of fresh) {
@@ -221,6 +276,9 @@ export class Store {
         )
         const r = reduceSession(prev, ev)
         sessions.set(ev.sessionId, r.session)
+        const a = attend(attention, ev, r.session)
+        this.saveAttention(a)
+        attention = a.state
         if (ev.kind === 'subagent.started' && ev.agentType) agentTypes.push([ev.agentType, ev.ts])
         if (r.span) {
           insertSpan.run(ev.sessionId, r.span[0], r.span[1])
@@ -239,6 +297,7 @@ export class Store {
     })
 
     for (const [id, s] of sessions) this.sessions.set(id, s)
+    this.attention = attention
     for (const [t, at] of agentTypes) this.agentTypes.set(t, at)
     this.spans.push(...spans)
     this.finished.push(...finished)
@@ -268,7 +327,7 @@ export class Store {
       awaySince: extras.awaySince,
       awayUntil: extras.awayUntil,
       sessions: sessions.map(toSession),
-      attention: [], // M3: the attention engine (ADR-0013)
+      attention: this.attention.open.map(toItem),
       files: [...latest.values()].sort((a, b) => b.changedAt - a.changedAt).slice(0, MAX_FILES),
       week: {
         agentTimeMs: Math.round(agentTime(week, now)),
@@ -293,7 +352,9 @@ export class Store {
       this.db.prepare('DELETE FROM work_spans WHERE end_ts < ?').run(cutoff)
       this.db.prepare('DELETE FROM finished_turns WHERE ts < ?').run(cutoff)
       this.db.prepare('DELETE FROM files WHERE changed_at < ?').run(cutoff)
+      this.db.prepare('DELETE FROM attention_items WHERE COALESCE(resolved_at, opened_at) < ?').run(cutoff)
     })
+    this.attention = { ...this.attention, open: this.attention.open.filter((i) => i.openedAt >= cutoff) }
     const since = lastWeekStart(now)
     this.spans = this.spans.filter((x) => x.end >= since)
     this.finished = this.finished.filter((t) => t >= since)
