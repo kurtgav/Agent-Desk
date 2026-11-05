@@ -10,6 +10,8 @@ const EVIDENCE = 'docs/evidence'
 
 let app: ElectronApplication | undefined
 let userData = ''
+/** The open window's console errors and page errors; printed when a test fails, so CI shows what broke. */
+let pageErrors: string[] = []
 
 /** Strip CLAUDE* so a dev run inside Claude Code can't leak into the app (F8); never poll the real machine (D-048). */
 function appEnv(): Record<string, string> {
@@ -25,6 +27,7 @@ async function open(width: number, height: number): Promise<{ page: Page; errors
   app = await electron.launch({ args: [MAIN], env: appEnv() })
   const page = await app.firstWindow()
   const errors: string[] = []
+  pageErrors = errors
   page.on('console', (m) => {
     if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`)
   })
@@ -44,6 +47,8 @@ async function open(width: number, height: number): Promise<{ page: Page; errors
 }
 
 test.afterEach(async () => {
+  const info = test.info()
+  if (info.status !== info.expectedStatus && pageErrors.length) console.error(`page errors in "${info.title}":\n${pageErrors.join('\n')}`)
   await app?.close().catch(() => undefined)
   app = undefined
   rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
