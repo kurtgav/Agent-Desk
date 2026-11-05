@@ -181,8 +181,11 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
   const setStatus = (next: Status): void => {
     if (s.status === next) return
     if (s.status === 'working' && s.workingSince !== null && ev.ts > s.workingSince) out.span = [s.workingSince, ev.ts]
+    // Waiting for your answer isn't run time: an approved tool's stall clock (P3, M) starts once it may run.
+    const inflight = s.status === 'needs_you' && next === 'working' ? s.inflight.map((t) => ({ ...t, startedAt: ev.ts })) : s.inflight
     s = {
       ...s,
+      inflight,
       status: next,
       workingSince: next === 'working' ? ev.ts : null,
       waitingSince: next === 'needs_you' ? (s.waitingSince ?? ev.ts) : null

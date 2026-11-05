@@ -148,11 +148,15 @@ describe('P1 approvals (acceptance: appears, then clears once answered)', () => 
   })
 
   it('closes on a denial or any later event of the same agent, but not on another agent', () => {
+    const asked = (): Run => new Run().feed(bash(1_000, 'tool.started', 'ls'), bash(1_100, 'permission.requested', 'ls', null))
     const sub = ev('tool.started', { ts: 1_200, agentId: 'a1', toolName: 'Read', toolUseId: 't9', payload: { tool_input: {} } })
-    const r = new Run().feed(bash(1_000, 'tool.started', 'ls'), bash(1_100, 'permission.requested', 'ls', null), sub)
+    const r = asked().feed(sub)
     expect(r.open).toHaveLength(1)
     r.feed(ev('permission.denied', { ts: 1_300, toolName: 'Bash', toolUseId: 't1' }))
     expect(r.open).toEqual([])
+    // Any later event, not just a denial (S4: the prompt is gone once the agent moves on).
+    expect(asked().feed(ev('turn.stopped', { ts: 1_300, payload: {} })).open.filter((i) => i.priority === 1)).toEqual([])
+    expect(asked().feed(bash(1_300, 'tool.started', 'pwd', 't2')).open.filter((i) => i.priority === 1)).toEqual([])
   })
 
   it('a permission_prompt notification enriches the approval instead of duplicating it', () => {
@@ -188,6 +192,18 @@ describe('P1 approvals (acceptance: appears, then clears once answered)', () => 
     expect(r.closed).toEqual([expect.objectContaining({ by: 'superseded', state: 'superseded' })])
   })
 
+  it('a hook item that supersedes a poll item keeps what the poll saw, so the poll can still close it', () => {
+    const r = new Run().feed(
+      poll(1_000, { sessionId: 's1', status: 'waiting', waitingFor: 'permission prompt' }),
+      bash(1_100, 'tool.started', 'ls'),
+      bash(1_200, 'permission.requested', 'ls', null)
+    )
+    expect(r.open).toEqual([expect.objectContaining({ title: 'Run `ls`', pollSaw: true })])
+    r.feed(poll(9_000, { sessionId: 's1', status: 'busy' })) // answered; the long tool sends nothing until it ends
+    expect(r.open).toEqual([])
+    expect(r.closed.at(-1)).toMatchObject({ by: 'poll', at: 9_000 })
+  })
+
   it('AskUserQuestion opens a question with the first question as its title', () => {
     const r = new Run().feed(ev('tool.started', {
       ts: 1_000, toolName: 'AskUserQuestion', toolUseId: 'q1',
@@ -205,11 +221,13 @@ describe('P1 approvals (acceptance: appears, then clears once answered)', () => 
 })
 
 describe('P2 failed, P4 review', () => {
-  it('StopFailure opens a failure with its fix hint; the next working poll closes it', () => {
-    const r = new Run().feed(ev('turn.failed', { ts: 1_000, payload: { error: 'rate_limit' } }))
-    expect(r.open).toEqual([expect.objectContaining({ priority: 2, kind: 'failed', title: 'Stopped: rate limit reached', hint: expect.stringContaining('/usage') })])
-    r.feed(ev('session.prompt', { ts: 5_000 }))
+  it('StopFailure opens a failure with its fix hint; the next prompt or a working poll closes it', () => {
+    const failed = (): Run => new Run().feed(ev('turn.failed', { ts: 1_000, payload: { error: 'rate_limit' } }))
+    expect(failed().open).toEqual([expect.objectContaining({ priority: 2, kind: 'failed', title: 'Stopped: rate limit reached', hint: expect.stringContaining('/usage') })])
+    expect(failed().feed(ev('session.prompt', { ts: 5_000 })).open).toEqual([])
+    const r = failed().feed(poll(20_000, { sessionId: 's1', status: 'busy' })) // resumed on its own (quota_auto_resume)
     expect(r.open).toEqual([])
+    expect(r.closed.at(-1)).toMatchObject({ by: 'poll' })
   })
 
   it('an unknown error code still says what happened', () => {
@@ -257,8 +275,33 @@ describe('P3 possibly stuck and Dismiss (test 9)', () => {
   })
 
   it('never flags an idle or waiting session', () => {
-    const r = new Run().feed(ev('turn.stopped', { ts: 0, payload: {} })).tick(DEFAULT_STALL.idleMs * 10)
-    expect(r.open.filter((i) => i.kind === 'stuck')).toEqual([])
+    const stuck = (r: Run): unknown[] => r.open.filter((i) => i.kind === 'stuck')
+    expect(stuck(new Run().feed(ev('turn.stopped', { ts: 0, payload: {} })).tick(DEFAULT_STALL.idleMs * 10))).toEqual([])
+    expect(stuck(working().feed(bash(1_100, 'permission.requested', 'npm run build', null)).tick(DEFAULT_STALL.toolMs * 10))).toEqual([])
+  })
+
+  it('time spent waiting for an approval is not run time', () => {
+    const wait = 15 * 60_000
+    const r = working().feed(
+      bash(1_100, 'permission.requested', 'npm run build', null),
+      poll(2_000, { sessionId: 's1', status: 'waiting', waitingFor: 'permission prompt' }),
+      poll(1_100 + wait, { sessionId: 's1', status: 'busy' }) // approved in the terminal; the build starts now
+    )
+    expect(r.open).toEqual([])
+    r.tick(1_100 + wait + 3_000)
+    expect(r.open).toEqual([])
+    r.tick(1_101 + wait + DEFAULT_STALL.toolMs)
+    expect(r.open).toEqual([expect.objectContaining({ kind: 'stuck', hint: expect.stringContaining('This tool') })])
+  })
+
+  it("another agent's event leaves a long tool's P3 alone; the tool's own end closes it", () => {
+    const r = working().tick(1_001 + DEFAULT_STALL.toolMs)
+    const id = r.open[0]!.id
+    r.feed(ev('tool.started', { ts: 1_002 + DEFAULT_STALL.toolMs, agentId: 'a1', toolName: 'Read', toolUseId: 't9', payload: { tool_input: {} } }))
+    r.tick(1_003 + DEFAULT_STALL.toolMs)
+    expect(r.open.map((i) => i.id)).toEqual([id])
+    r.feed(bash(1_004 + DEFAULT_STALL.toolMs, 'tool.finished', 'npm run build'))
+    expect(r.open).toEqual([])
   })
 
   it('a dismissed P3 snoozes for 2N, then may open again', () => {

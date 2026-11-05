@@ -219,12 +219,22 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
     opened.push(item)
   }
   const agentKey = (suffix: string, agentId = ev.agentId): string => `${sid}|${agentId ?? 'main'}|${suffix}`
+  // A hook item that replaces a poll item inherits what the poll saw: an unchanged poll row sends no new event,
+  // so without this the poll could never close it (M3 code review).
+  const supersede = (): boolean => {
+    const polled = open.some((i) => i.sessionId === sid && i.priority === 1 && i.source === 'poll')
+    close((i) => i.priority === 1 && i.source === 'poll', 'superseded', 'superseded')
+    return polled
+  }
   const hasP1 = (agentId?: string | null): boolean =>
     open.some((i) => i.sessionId === sid && i.priority === 1 && (agentId === undefined || i.agentId === agentId))
 
   // 1. Resolutions: an answer anywhere closes the item (STATE_MACHINE § 3 "Resolves when").
+  // Idle-stuck closes on any next event; tool-stuck only once its tool is done, or another agent's event would
+  // close it and the next tick reopen it under a new id (M3 code review).
+  const unstuck = (i: AttentionRecord): boolean => i.kind === 'stuck' && !session.inflight.some((t) => t.toolUseId === i.toolUseId)
   if (ev.source === 'hook') {
-    close((i) => i.kind === 'stuck', 'hook') // any next event for that session
+    close(unstuck, 'hook')
     if (ev.kind !== 'notification') {
       // Any later event of the same agent means its prompt was answered (S4); a Post of the same call says how.
       close((i) => i.priority === 1 && i.source !== 'poll' && i.agentId === ev.agentId, 'hook')
@@ -242,7 +252,7 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
     close((i) => !(keepReview && i.kind === 'review'), 'session-ended')
   }
   if (ev.kind === 'session.state') {
-    close((i) => i.kind === 'stuck', 'poll')
+    close(unstuck, 'poll')
     const wait = pollWait(p)
     // Mark the waits the poll has seen, then close the ones it no longer shows.
     open = open.map((i) => (i.sessionId === sid && i.priority === 1 && matches(i.kind, wait) ? { ...i, pollSaw: true } : i))
@@ -255,10 +265,10 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
   switch (ev.kind) {
     case 'permission.requested': {
       const input = obj(p.tool_input)
-      close((i) => i.priority === 1 && i.source === 'poll', 'superseded', 'superseded')
+      const pollSaw = supersede()
       add({
         key: agentKey(ev.toolUseId ?? 'permission'), priority: 1, kind: 'approval', agentId: ev.agentId, toolUseId: ev.toolUseId,
-        toolName: ev.toolName, title: approvalTitle(ev.toolName, input, session.cwd), riskFlags: riskFlags(ev.toolName, input, session.cwd)
+        toolName: ev.toolName, title: approvalTitle(ev.toolName, input, session.cwd), riskFlags: riskFlags(ev.toolName, input, session.cwd), pollSaw
       }, 'hook')
       break
     }
@@ -266,8 +276,8 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
       const input = obj(p.tool_input)
       if (ev.toolName === 'AskUserQuestion') {
         const first = Array.isArray(input.questions) ? str(obj(input.questions[0]), 'question') : null
-        close((i) => i.priority === 1 && i.source === 'poll', 'superseded', 'superseded')
-        add({ key: agentKey('answer'), priority: 1, kind: 'question', agentId: ev.agentId, toolUseId: ev.toolUseId, toolName: ev.toolName, title: cap(first ?? 'Answer a question', TITLE_MAX) }, 'hook')
+        const pollSaw = supersede()
+        add({ key: agentKey('answer'), priority: 1, kind: 'question', agentId: ev.agentId, toolUseId: ev.toolUseId, toolName: ev.toolName, title: cap(first ?? 'Answer a question', TITLE_MAX), pollSaw }, 'hook')
       } else if (ev.toolName === 'ExitPlanMode') {
         add({ key: agentKey('answer'), priority: 1, kind: 'question', agentId: ev.agentId, toolUseId: ev.toolUseId, toolName: ev.toolName, title: 'Plan ready to approve' }, 'hook')
       }
@@ -327,18 +337,18 @@ export function stall(state: AttentionState, sessions: Iterable<SessionState>, n
   const opened: AttentionRecord[] = []
   for (const s of sessions) {
     if (s.ended || s.status !== 'working') continue
-    const candidates: { key: string; agentId: string | null; title: string; hint: string }[] = []
+    const candidates: { key: string; agentId: string | null; toolUseId: string | null; title: string; hint: string }[] = []
     const long = s.inflight.find((t) => t.startedAt !== undefined && now - t.startedAt > cfg.toolMs)
     if (long) {
-      candidates.push({ key: `${s.id}|${long.agentId ?? 'main'}|stuck`, agentId: long.agentId, title: `Possibly stuck: ${long.summary}`, hint: `This tool has run for over ${minutes(cfg.toolMs)}.` })
+      candidates.push({ key: `${s.id}|${long.agentId ?? 'main'}|stuck`, agentId: long.agentId, toolUseId: long.toolUseId, title: `Possibly stuck: ${long.summary}`, hint: `This tool has run for over ${minutes(cfg.toolMs)}.` })
     } else if (!s.inflight.length && !s.agents.length && now - s.lastEventAt > cfg.idleMs) {
-      candidates.push({ key: `${s.id}|main|stuck`, agentId: null, title: `Possibly stuck: ${s.activity}`, hint: `No activity for over ${minutes(cfg.idleMs)}.` })
+      candidates.push({ key: `${s.id}|main|stuck`, agentId: null, toolUseId: null, title: `Possibly stuck: ${s.activity}`, hint: `No activity for over ${minutes(cfg.idleMs)}.` })
     }
     for (const c of candidates) {
       if (open.some((i) => i.key === c.key) || (state.quiet[c.key] ?? 0) > now) continue
       const item: AttentionRecord = {
         id: ulid(now), key: c.key, priority: 3, kind: 'stuck', sessionId: s.id, title: c.title, toolName: null, hint: c.hint,
-        riskFlags: [], held: false, openedAt: now, agentId: c.agentId, toolUseId: null, source: 'tick', pollSaw: false
+        riskFlags: [], held: false, openedAt: now, agentId: c.agentId, toolUseId: c.toolUseId, source: 'tick', pollSaw: false
       }
       open = [...open, item]
       opened.push(item)
