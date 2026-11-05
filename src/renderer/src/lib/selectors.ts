@@ -1,13 +1,7 @@
 import type { AttentionItem, Session, Snapshot } from '@shared/snapshot'
+import { pathKey, projectName } from '@shared/paths'
 
-/** Last path segment of a cwd, either separator. */
-export function projectName(cwd: string): string {
-  const parts = cwd.split(/[\\/]+/).filter(Boolean)
-  return parts[parts.length - 1] ?? cwd
-}
-
-/** Windows paths are case-insensitive (D-013). */
-const pathKey = (p: string): string => p.replace(/\//g, '\\').toLowerCase()
+export { projectName }
 
 export function sessionIndex(s: Snapshot): Map<string, Session> {
   return new Map(s.sessions.map((x) => [x.id, x]))
@@ -18,20 +12,32 @@ export function byPriority(items: readonly AttentionItem[]): AttentionItem[] {
   return [...items].sort((a, b) => a.priority - b.priority || a.openedAt - b.openedAt)
 }
 
+/**
+ * Sessions marked needs_you that have no open attention item. Until the attention engine (M3)
+ * that is every waiting live session; they count as P1 so no number says "nothing waits" (D-054).
+ */
+export function waitingWithoutItem(s: Snapshot): Session[] {
+  const covered = new Set(s.attention.map((i) => i.sessionId))
+  return s.sessions.filter((x) => x.status === 'needs_you' && !covered.has(x.id))
+}
+
 export function needsOkCount(s: Snapshot): number {
-  return s.attention.filter((i) => i.priority === 1).length
+  return s.attention.filter((i) => i.priority === 1).length + waitingWithoutItem(s).length
 }
 
 /** "Waiting for you" = open P1 + P2 (D-009). */
 export function waiting(s: Snapshot): { count: number; oldestAt: number | null } {
-  const open = s.attention.filter((i) => i.priority <= 2)
-  return { count: open.length, oldestAt: open.length ? Math.min(...open.map((i) => i.openedAt)) : null }
+  const times = [
+    ...s.attention.filter((i) => i.priority <= 2).map((i) => i.openedAt),
+    ...waitingWithoutItem(s).map((x) => x.waitingSince ?? x.lastEventAt)
+  ]
+  return { count: times.length, oldestAt: times.length ? Math.min(...times) : null }
 }
 
 export function tasksFinished(s: Snapshot): { count: number; whileAway: number } {
   const turns = s.week.finishedTurns
-  const away = s.awaySince
-  return { count: turns.length, whileAway: away === null ? 0 : turns.filter((t) => t >= away).length }
+  const { awaySince: from, awayUntil: to } = s
+  return { count: turns.length, whileAway: from === null ? 0 : turns.filter((t) => t >= from && (to === null || t <= to)).length }
 }
 
 export function filesChanged(s: Snapshot): { count: number; projects: number } {

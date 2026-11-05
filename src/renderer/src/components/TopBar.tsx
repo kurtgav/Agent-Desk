@@ -17,8 +17,8 @@ function ActiveAgents() {
   const more = active.length - shown.length
   if (!active.length) return null
   return (
-    <Hint label={`${active.length} active sessions. ${PENDING_LABEL.M2}`}>
-      <button type="button" aria-label={`${active.length} active sessions`} {...pending('M2')} className="flex items-center rounded-full p-0.5 hover:bg-active">
+    <Hint label={`${active.length} active sessions. ${PENDING_LABEL.M4}`}>
+      <button type="button" aria-label={`${active.length} active sessions`} {...pending('M4')} className="flex items-center rounded-full p-0.5 hover:bg-active">
         {shown.map((x, i) => (
           <span key={x.id} className={i ? '-ml-1.5' : ''}>
             <span className="grid size-7 place-items-center rounded-full bg-surface">
@@ -46,10 +46,10 @@ export function TopBar() {
       </nav>
 
       <div className="flex flex-1 justify-center">
-        <Hint label={`Search: ${PENDING_LABEL.M2}`}>
+        <Hint label={`Search: ${PENDING_LABEL.M4}`}>
           <button
             type="button"
-            {...pending('M2')}
+            {...pending('M4')}
             className="app-no-drag flex h-8 w-[300px] items-center gap-2 rounded-full bg-well px-3 text-[13px] text-muted"
           >
             <Search size={14} strokeWidth={1.75} />
@@ -61,7 +61,7 @@ export function TopBar() {
 
       <div className="app-no-drag flex items-center gap-2">
         {mode === 'demo' && (
-          <Hint label="Sample data for the M1 design check. Live data arrives in M2.">
+          <Hint label="Sample sessions, not yours. Turn off under Third Code › Demo data.">
             {/* Focusable so keyboard users can reach the explanation in the tooltip. */}
             <span tabIndex={0} className="inline-flex h-[26px] items-center gap-1.5 rounded-full bg-[var(--needs-bg)] px-2.5 text-[12px] font-medium text-[var(--needs-ink)]">
               <span className="size-1.5 rounded-full bg-[var(--needs)]" aria-hidden />

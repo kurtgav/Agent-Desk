@@ -33,8 +33,8 @@ export function RecentFiles() {
         id="recent-files"
         title="Recent files"
         action={
-          <Hint label={PENDING_LABEL.M2}>
-            <Button variant="ghost" size="sm" {...pending('M2')}>
+          <Hint label={PENDING_LABEL.M4}>
+            <Button variant="ghost" size="sm" {...pending('M4')}>
               See all
             </Button>
           </Hint>

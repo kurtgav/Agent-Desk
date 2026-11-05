@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentDeckBridge } from '@shared/bridge'
+import type { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from './demo/snapshot'
-import { useUi } from './store'
+import { connect, useUi } from './store'
 
 const NOW = Date.UTC(2026, 10, 5, 14, 0)
 const session = (id: string) => useUi.getState().snapshot.sessions.find((s) => s.id === id)!
@@ -47,6 +49,49 @@ describe('resolve (demo answers stay local)', () => {
     useUi.getState().resolve('nope', 'approved')
     expect(useUi.getState().snapshot).toBe(before)
     expect(useUi.getState().announcement).toBe('')
+  })
+})
+
+describe('connect (D-059: no collector, no "All quiet")', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function fakeBridge(demo: boolean) {
+    let push: (s: Snapshot | null) => void = () => undefined
+    const bridge: AgentDeckBridge = {
+      getAppInfo: async () => ({ version: '0.1.0', demo }),
+      getSnapshot: async () => null,
+      onSnapshot: (l) => {
+        push = l
+        return () => undefined
+      },
+      setDemo: async () => undefined
+    }
+    vi.stubGlobal('window', { agentdeck: bridge })
+    return (s: Snapshot | null) => push(s)
+  }
+
+  it('is connecting until the first snapshot, down while the collector restarts, up again after', async () => {
+    useUi.setState({ link: 'connecting' })
+    const push = fakeBridge(false)
+    connect()
+    await vi.waitFor(() => expect(useUi.getState().version).toBe('0.1.0'))
+    expect(useUi.getState().link).toBe('connecting')
+    const live = { ...demoSnapshot(NOW), mode: 'live' as const }
+    push(live)
+    expect(useUi.getState()).toMatchObject({ link: 'up', snapshot: live })
+    push(null)
+    expect(useUi.getState().link).toBe('down')
+    expect(useUi.getState().snapshot.sessions).toEqual([]) // nothing stale stays on screen
+    push(live)
+    expect(useUi.getState().link).toBe('up')
+  })
+
+  it('demo data is always up', async () => {
+    useUi.setState({ link: 'connecting' })
+    fakeBridge(true)
+    connect()
+    await vi.waitFor(() => expect(useUi.getState().link).toBe('up'))
+    expect(useUi.getState().snapshot.mode).toBe('demo')
   })
 })
 

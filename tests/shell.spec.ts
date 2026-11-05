@@ -19,13 +19,16 @@ function freshUserData(): string {
   return dir
 }
 
-/** This machine runs inside Claude Code; none of its CLAUDE* vars may leak into the app. */
+/**
+ * This machine runs inside Claude Code; none of its CLAUDE* vars may leak into the app. The app runs
+ * live, but must not poll (D-048) or count the real agents folder: its config dir is the temp folder.
+ */
 function appEnv(userData: string): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !key.startsWith('CLAUDE')) env[key] = value
   }
-  return { ...env, AGENTDECK_USER_DATA: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
 }
 
 async function launch(userData: string, extraArgs: string[] = []): Promise<ElectronApplication> {
@@ -56,7 +59,7 @@ test.afterEach(async () => {
   dirs = []
 })
 
-test('window appears with the demo title, minimum size and locked-down renderer', async () => {
+test('window appears live by default, at minimum size, with a locked-down renderer', async () => {
   const app = await launch(freshUserData())
   await expectVisible(app, true)
 
@@ -73,7 +76,7 @@ test('window appears with the demo title, minimum size and locked-down renderer'
       prefs: { contextIsolation: p.contextIsolation, sandbox: p.sandbox, nodeIntegration: p.nodeIntegration, webSecurity: p.webSecurity }
     }
   })
-  expect(info.title).toBe('AgentDeck (Demo)')
+  expect(info.title).toBe('AgentDeck')
   expect(info.bounds.width).toBeGreaterThanOrEqual(1200)
   expect(info.bounds.height).toBeGreaterThanOrEqual(760)
   expect(info.minimumSize).toEqual([1200, 760])
@@ -85,7 +88,7 @@ test('window appears with the demo title, minimum size and locked-down renderer'
     const g = globalThis as { agentdeck?: AgentDeckBridge; require?: unknown; process?: unknown }
     return { appInfo: await g.agentdeck?.getAppInfo(), require: typeof g.require, process: typeof g.process }
   })
-  expect(renderer.appInfo?.demo).toBe(true)
+  expect(renderer.appInfo?.demo).toBe(false)
   expect(renderer.require).toBe('undefined')
   expect(renderer.process).toBe('undefined')
 

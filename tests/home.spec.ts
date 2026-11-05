@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
@@ -11,15 +11,17 @@ const EVIDENCE = 'docs/evidence'
 let app: ElectronApplication | undefined
 let userData = ''
 
-/** Strip CLAUDE* so a dev run inside Claude Code can't leak into the app (F8). */
+/** Strip CLAUDE* so a dev run inside Claude Code can't leak into the app (F8); never poll the real machine (D-048). */
 function appEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v
-  return { ...env, AGENTDECK_USER_DATA: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
 }
 
+/** These tests check the reference design against the fixed demo data (ADR-0011), so demo mode is seeded. */
 async function open(width: number, height: number): Promise<{ page: Page; errors: string[] }> {
   userData = mkdtempSync(join(tmpdir(), 'agentdeck-home-'))
+  writeFileSync(join(userData, 'config.json'), JSON.stringify({ demo: true }))
   app = await electron.launch({ args: [MAIN], env: appEnv() })
   const page = await app.firstWindow()
   const errors: string[] = []
@@ -123,7 +125,7 @@ test('later-milestone controls are inert and say when they arrive', async () => 
   // Keyboard focus shows the explanation too (the loop above leaves focus on another control).
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Search sessions/ }).focus()
-  await expect(page.getByRole('tooltip')).toHaveText('Search: Arrives with live data (M2)')
+  await expect(page.getByRole('tooltip')).toHaveText('Search: Arrives with lists and actions (M4)')
 
   // Pending menu rows are reachable by keyboard, explain themselves, and keep the menu as it was.
   await page.getByRole('button', { name: 'More', exact: true }).click()

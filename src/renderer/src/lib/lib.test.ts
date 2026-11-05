@@ -122,4 +122,15 @@ describe('selectors on edge cases', () => {
     const one = { ...empty, attention: demoSnapshot(NOW).attention.slice(0, 1) }
     expect(summaryLine(one)).toBe('1 thing needs your OK.')
   })
+  it('counts a waiting live session that has no attention item yet (D-054)', () => {
+    const demo = demoSnapshot(NOW)
+    const portal = demo.sessions.find((x) => x.id === 's-portal')!
+    const live = { ...empty, sessions: [portal, { ...portal, id: 'x', status: 'working' as const }] }
+    expect(waiting(live)).toEqual({ count: 1, oldestAt: portal.waitingSince })
+    expect(needsOkCount(live)).toBe(1)
+    expect(summaryLine(live)).toBe('1 thing needs your OK.')
+    // An item for the same session is not counted twice.
+    const both = { ...live, attention: demo.attention.filter((i) => i.sessionId === 's-portal') }
+    expect(waiting(both).count).toBe(1)
+  })
 })
