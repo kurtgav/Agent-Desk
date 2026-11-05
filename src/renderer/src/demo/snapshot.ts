@@ -59,6 +59,7 @@ export function demoSnapshot(now: number): Snapshot {
     mode: 'demo',
     generatedAt: now,
     awaySince: ago(95),
+    awayUntil: null,
     sessions: [
       {
         id: 's-deck', bgId: null, name: 'agentdeck-ui', cwd: PATHS.deck, surface: 'desktop', status: 'working',
