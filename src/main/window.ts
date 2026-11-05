@@ -20,6 +20,7 @@ export interface MainWindowOptions {
   /** `--hidden`: start in the tray without showing the window. */
   hidden: boolean
   icon: string
+  title: string
   /** Called each time a close is turned into hide-to-tray. */
   onHiddenToTray: () => void
 }
@@ -32,7 +33,7 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     screen.getPrimaryDisplay().workArea
   )
   const win = new BrowserWindow(
-    buildWindowOptions({ bounds: state.bounds, preload: join(__dirname, '../preload/index.js'), icon: opts.icon })
+    buildWindowOptions({ bounds: state.bounds, preload: join(__dirname, '../preload/index.js'), icon: opts.icon, title: opts.title })
   )
 
   lockDown(win)
@@ -71,7 +72,7 @@ function lockDown(win: BrowserWindow): void {
     lastReload = Date.now()
     win.webContents.reload()
   })
-  // The title is fixed for M1 (demo); the page's <title> must not replace it.
+  // Main owns the title (it carries "(Demo)" in demo mode); the page's <title> must not replace it.
   win.on('page-title-updated', (event) => event.preventDefault())
 }
 
