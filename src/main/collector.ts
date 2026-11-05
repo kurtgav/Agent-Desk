@@ -6,10 +6,17 @@ export function restartDelay(attempt: number): number {
   return Math.min(500 * 2 ** attempt, 30_000)
 }
 const HEALTHY_MS = 30_000
+/** A request the collector hasn't answered by then resolves to null (it is busy, or restarting). */
+const REQUEST_TIMEOUT_MS = 5_000
+/** How long quit waits for the collector to answer held requests and close; then it is killed. */
+const STOP_GRACE_MS = 1_000
 
 export interface Supervisor {
   post(m: ToCollector): void
-  stop(): void
+  /** Sends a request built around a fresh `reqId`; resolves with the reply, or null on timeout or exit. */
+  request(build: (reqId: number) => ToCollector): Promise<FromCollector | null>
+  /** Asks the collector to close (held requests get their empty reply), kills it after 1 s at the latest. */
+  stop(): Promise<void>
 }
 
 /**
@@ -27,8 +34,10 @@ export function superviseCollector(
   let attempt = 0
   let startedAt = 0
   let retry: NodeJS.Timeout | null = null
-  // Visibility and focus are state: a restarted collector must get the latest of each.
+  // Visibility and focus are state: a restarted collector must get the latest of each. Commands and requests are not replayed.
   const latest = new Map<string, ToCollector>()
+  const waiting = new Map<number, (m: FromCollector | null) => void>()
+  let nextReq = 1
 
   const spawn = (): void => {
     retry = null
@@ -39,9 +48,13 @@ export function superviseCollector(
       execArgv: ['--disable-warning=ExperimentalWarning']
     })
     child = proc
-    proc.on('message', (m: FromCollector) => onMessage(m))
+    proc.on('message', (m: FromCollector) => {
+      if ('reqId' in m) waiting.get(m.reqId)?.(m)
+      else onMessage(m)
+    })
     proc.on('exit', () => {
       if (child === proc) child = null
+      for (const answer of [...waiting.values()]) answer(null)
       if (stopped) return
       onDown()
       if (Date.now() - startedAt > HEALTHY_MS) attempt = 0
@@ -54,14 +67,41 @@ export function superviseCollector(
 
   return {
     post: (m) => {
-      latest.set(m.type, m)
+      if (m.type === 'visible' || m.type === 'focus' || m.type === 'approvals') latest.set(m.type, m)
       child?.postMessage(m)
+    },
+    request: (build) => {
+      if (!child) return Promise.resolve(null)
+      const reqId = nextReq++
+      const proc = child
+      return new Promise((resolve) => {
+        const answer = (m: FromCollector | null): void => {
+          clearTimeout(timer)
+          waiting.delete(reqId)
+          resolve(m)
+        }
+        const timer = setTimeout(() => answer(null), REQUEST_TIMEOUT_MS)
+        waiting.set(reqId, answer)
+        proc.postMessage(build(reqId))
+      })
     },
     stop: () => {
       stopped = true
       if (retry) clearTimeout(retry)
-      child?.kill()
+      const proc = child
       child = null
+      if (!proc) return Promise.resolve()
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          proc.kill()
+          resolve()
+        }, STOP_GRACE_MS)
+        proc.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        proc.postMessage({ type: 'close' } satisfies ToCollector)
+      })
     }
   }
 }

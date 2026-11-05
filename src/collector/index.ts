@@ -1,6 +1,7 @@
 // Utility-process entry (ADR-0002). Talks to main over parentPort only; everything else lives in app.ts.
 import type {} from 'electron' // types process.parentPort
 import type { FromCollector, ToCollector } from '@shared/collector'
+import { HISTORY_MAX } from '@shared/detail'
 import { startCollector, type Collector } from './app'
 
 const SNAPSHOT_THROTTLE_MS = 100
@@ -15,6 +16,7 @@ let timer: NodeJS.Timeout | null = null
 // Window state can arrive while the collector is still binding its port; apply it once it exists.
 let visible = true
 let away: { focused: boolean; at: number } | null = null
+let approvals = { enabled: false, waitMs: 0 }
 
 function push(): void {
   timer = null
@@ -36,6 +38,7 @@ parent.on('message', (e: { data: ToCollector }) => {
       .then((c) => {
         collector = c
         c.setVisible(visible)
+        c.setApprovals(approvals)
         if (away) c.setFocused(away.focused, away.at)
         post({ type: 'ready', port: c.port })
         push()
@@ -51,7 +54,31 @@ parent.on('message', (e: { data: ToCollector }) => {
   } else if (m.type === 'focus') {
     away = m
     collector?.setFocused(m.focused, m.at)
+  } else if (m.type === 'approvals') {
+    approvals = { enabled: m.enabled, waitMs: m.waitMs }
+    collector?.setApprovals(approvals)
   } else if (m.type === 'dismiss') {
     collector?.dismiss(m.id)
+  } else if (m.type === 'decide') {
+    const result = collector?.decide(m.itemId, m.verdict) ?? { ok: false as const, error: 'AgentDeck is still starting its collector.' }
+    post({ type: 'decided', reqId: m.reqId, result })
+  } else if (m.type === 'close') {
+    void (collector?.close() ?? Promise.resolve()).catch(report).finally(() => process.exit(0))
+  } else if (m.type === 'detail') {
+    let detail = null
+    try {
+      detail = collector?.detail(m.sessionId) ?? null
+    } catch (err) {
+      report(err) // the drawer shows "could not load"; main never waits forever
+    }
+    post({ type: 'detail', reqId: m.reqId, detail })
+  } else if (m.type === 'history') {
+    let history = null
+    try {
+      history = collector ? { activity: collector.activity(HISTORY_MAX), audit: collector.auditLog(HISTORY_MAX) } : null
+    } catch (err) {
+      report(err)
+    }
+    post({ type: 'history', reqId: m.reqId, history })
   }
 })

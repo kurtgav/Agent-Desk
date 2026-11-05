@@ -2,7 +2,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { readConfig, readJson, updateConfig, writeJson } from './config'
+import { readConfig, readJson, remoteApprovals, updateConfig, writeJson } from './config'
+
+describe('remoteApprovals (ADR-0006)', () => {
+  test('off with a 60 s wait unless config.json says otherwise; the wait is clamped to 15–300 s', () => {
+    expect(remoteApprovals({})).toEqual({ enabled: false, waitSec: 60 })
+    expect(remoteApprovals({ remoteApprovals: { enabled: 'yes', waitSec: '90' } })).toEqual({ enabled: false, waitSec: 60 })
+    expect(remoteApprovals({ remoteApprovals: { enabled: true, waitSec: 90.4 } })).toEqual({ enabled: true, waitSec: 90 })
+    expect(remoteApprovals({ remoteApprovals: { enabled: true, waitSec: 1 } }).waitSec).toBe(15)
+    expect(remoteApprovals({ remoteApprovals: { enabled: true, waitSec: 1e9 } }).waitSec).toBe(300)
+  })
+})
 
 let dir: string
 let file: string

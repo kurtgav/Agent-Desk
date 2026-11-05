@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Popover from '@radix-ui/react-popover'
 import { CircleX, Eye, Hourglass, MessageCircle, ShieldAlert, Terminal } from 'lucide-react'
+import type { Verdict } from '@shared/bridge'
 import type { AttentionItem, AttentionKind, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
+import { answerItem, sessionAction } from '@/lib/act'
 import { ago } from '@/lib/format'
 import { byPriority, projectName, sessionIndex, waitingWithoutItem } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, cn, pending } from './ui'
+import { Button, Card, CardHeader, Inline, cn } from './ui'
 
 const MAX_ROWS = 3 // the reference shows three; the rest sit behind "See all"
 
@@ -22,11 +24,11 @@ const KIND: Record<AttentionKind, { icon: Icon; tone: 'needs' | 'failed' | 'idle
   review: { icon: Eye, tone: 'working', label: 'Ready for review' }
 }
 
-function ApproveButton({ item, session }: { item: AttentionItem; session: Session | undefined }) {
-  const resolve = useUi((s) => s.resolve)
+function ApproveButton({ item, session, answer }: { item: AttentionItem; session: Session | undefined; answer: (v: Verdict) => void }) {
+  const demo = useUi((s) => s.snapshot.mode === 'demo')
   if (!item.riskFlags.length) {
     return (
-      <Button variant="primary" size="sm" onClick={() => resolve(item.id, 'approved')}>
+      <Button variant="primary" size="sm" onClick={() => answer('approve')}>
         Approve
       </Button>
     )
@@ -55,13 +57,15 @@ function ApproveButton({ item, session }: { item: AttentionItem; session: Sessio
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[12px] text-muted">Demo data: approving here sends nothing.</p>
+          <p className="mt-3 text-[12px] text-muted">
+            {demo ? 'Demo data: approving here sends nothing.' : 'Approve lets this one call run. AgentDeck adds no permission rule.'}
+          </p>
           <div className="mt-5 flex justify-end gap-2">
             <Dialog.Close asChild>
               <Button size="sm">Cancel</Button>
             </Dialog.Close>
             <Dialog.Close asChild>
-              <Button variant="primary" size="sm" onClick={() => resolve(item.id, 'approved')}>
+              <Button variant="primary" size="sm" onClick={() => answer('approve')}>
                 Approve
               </Button>
             </Dialog.Close>
@@ -92,40 +96,57 @@ function AnswerInTerminal({ session }: { session: Session }) {
   )
 }
 
-function Later({ label, m }: { label: string; m: 'M4' }) {
-  return (
-    <Hint label={`${label}: ${PENDING_LABEL[m]}`}>
-      <Button size="sm" {...pending(m)}>
-        {label}
-      </Button>
-    </Hint>
-  )
-}
-
 function Actions({ item, session }: { item: AttentionItem; session: Session | undefined }) {
   const resolve = useUi((s) => s.resolve)
+  const open = useUi((s) => s.openDrawer)
+  const busy = useRef(false)
+  // One click, one answer: a double click must not send a second one (approve-once, ADR-0006).
+  const answer = (v: Verdict): void => {
+    if (busy.current) return
+    busy.current = true
+    void answerItem(item, v).finally(() => {
+      busy.current = false
+    })
+  }
   if (item.kind === 'approval' || item.kind === 'question') {
     if (item.held) {
       return (
         <>
-          <Button size="sm" onClick={() => resolve(item.id, 'rejected')}>
+          <Button size="sm" onClick={() => answer('reject')}>
             Reject
           </Button>
-          <ApproveButton item={item} session={session} />
+          <ApproveButton item={item} session={session} answer={answer} />
         </>
       )
     }
     if (!session) return null
     if (session.surface === 'cli' || session.surface === 'vscode') return <AnswerInTerminal session={session} />
-    if (session.surface === 'desktop') return <Later label="Open in Desktop" m="M4" />
-    return <Later label="Attach" m="M4" />
+    if (session.surface === 'desktop')
+      return (
+        <Button size="sm" onClick={() => void sessionAction('open-desktop', session)}>
+          Open in Desktop
+        </Button>
+      )
+    if (session.bgId)
+      return (
+        <Button size="sm" onClick={() => void sessionAction('attach', session)}>
+          Attach
+        </Button>
+      )
+    return (
+      <Button size="sm" onClick={() => open(session.id)}>
+        Open
+      </Button>
+    )
   }
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => resolve(item.id, 'dismissed')}>
         Dismiss
       </Button>
-      <Later label="Open" m="M4" />
+      <Button size="sm" onClick={() => open(item.sessionId)}>
+        Open
+      </Button>
     </>
   )
 }
@@ -204,22 +225,23 @@ function useRevealedItem(setExpanded: (v: boolean) => void): { flash: string | n
   return { flash, rows }
 }
 
-export function NeedsYou() {
+/** Home: every open item, three shown. The Approvals page (`approvals`): only P1 items, all of them. */
+export function NeedsYou({ approvals = false }: { approvals?: boolean }) {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(approvals)
   const { flash, rows } = useRevealedItem(setExpanded)
-  const items = byPriority(snapshot.attention)
+  const items = byPriority(snapshot.attention).filter((i) => !approvals || i.priority === 1)
   const sessions = sessionIndex(snapshot)
   const shown = expanded ? items : items.slice(0, MAX_ROWS)
-  const more = items.length - Math.min(items.length, MAX_ROWS)
+  const more = approvals ? 0 : items.length - Math.min(items.length, MAX_ROWS)
   const elsewhere = waitingWithoutItem(snapshot)
 
   return (
     <Card aria-labelledby="needs-you">
       <CardHeader
         id="needs-you"
-        title="Needs you"
+        title={approvals ? 'Waiting for your OK' : 'Needs you'}
         count={items.length + elsewhere.length}
         countLabel="open"
         action={
@@ -231,7 +253,7 @@ export function NeedsYou() {
         }
       />
       {shown.length ? (
-        <ul id="needs-you-list" className={cn(expanded && 'max-h-[420px] overflow-y-auto')}>
+        <ul id="needs-you-list" className={cn(expanded && !approvals && 'max-h-[420px] overflow-y-auto')}>
           {shown.map((i) => (
             <Row
               key={i.id}
@@ -253,7 +275,7 @@ export function NeedsYou() {
           <span className="text-muted">Answer it where it runs.</span>
         </p>
       ) : (
-        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">Nothing needs you right now.</p>
+        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">{approvals ? 'Nothing waits for your OK right now.' : 'Nothing needs you right now.'}</p>
       )}
     </Card>
   )

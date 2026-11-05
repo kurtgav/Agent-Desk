@@ -57,7 +57,7 @@ export const DEFAULT_STALL: StallConfig = { idleMs: 5 * 60_000, toolMs: 10 * 60_
 export const FAST_POLL_MS = 2 * 60_000
 
 const UNTIL_PROMPT = Number.MAX_SAFE_INTEGER
-const TITLE_MAX = 1_000
+export const TITLE_MAX = 1_000
 const REVIEW_TITLE_MAX = 160
 
 export const emptyAttention = (): AttentionState => ({ open: [], quiet: {} })
@@ -369,6 +369,13 @@ export function dismiss(state: AttentionState, id: string, now: number, cfg: Sta
     opened: [],
     closed: [{ item, at: now, by: 'user-dismiss', state: 'dismissed' }]
   }
+}
+
+/** A held approval answered in AgentDeck (ADR-0006): it closes at once, resolved by 'agentdeck'. */
+export function answer(state: AttentionState, id: string, now: number): Attended {
+  const item = state.open.find((i) => i.id === id)
+  if (!item?.held) return { state, opened: [], closed: [] }
+  return { state: { ...state, open: state.open.filter((i) => i !== item) }, opened: [], closed: [{ item, at: now, by: 'agentdeck', state: 'resolved' }] }
 }
 
 /** The 1 s poll runs while a P1 item younger than 2 min is open; 0 = no fast poll. */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from '../demo/snapshot'
 import { avatarFor, HUES, SHAPES } from './avatar'
-import { ago, ageWords, dateLabel, duration, timeOfDay, tokens, usd, weekDelta } from './format'
+import { ago, ageWords, clock, dateLabel, duration, timeOfDay, tokens, usd, weekDelta } from './format'
 import {
   byPriority, filesChanged, needsOkCount, projectName, recentProjects, recentSessions, running,
   summaryLine, tasksFinished, waiting
@@ -35,6 +35,12 @@ describe('format', () => {
     expect(weekDelta(600 * MIN, 640 * MIN)).toBe('40m less than last week')
     expect(weekDelta(10 * MIN, 10 * MIN)).toBe('Same as last week')
     expect(weekDelta(10 * MIN, 0)).toBe('Nothing to compare with last week')
+  })
+  it('shows timeline times: seconds today, the date before today (24-hour)', () => {
+    expect(clock(NOW + 7_000, NOW, 'en-US', 'UTC')).toBe('14:00:07')
+    expect(clock(NOW - 2 * 24 * 60 * MIN + 125 * MIN, NOW, 'en-US', 'UTC')).toBe('Nov 3, 16:05')
+    // Same calendar day in the given zone, not "within 24 hours": 14 hours ago, but yesterday.
+    expect(clock(Date.UTC(2026, 10, 4, 23, 59), NOW, 'en-US', 'UTC')).toBe('Nov 4, 23:59')
   })
   it('formats money and tokens', () => {
     expect(usd(23.8)).toBe('$23.80')

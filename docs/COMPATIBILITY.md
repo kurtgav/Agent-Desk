@@ -20,6 +20,7 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | PermissionRequest input | `tool_name`, `tool_input`, `permission_suggestions`; **no `tool_use_id`** | hooks § PermissionRequest input | spike S4 | — |
 | No decision in a no-prompt session | tool denied | hooks § PermissionRequest | spike S4 | — |
 | Empty reply in an interactive session | normal dialog shows | hooks (implied, not stated) | **unverified (S7b)** | unverified |
+| Held PermissionRequest (remote approvals) | the session waits for our reply up to the entry's `timeout` (wait + 10 s), and its own prompt is deferred meanwhile | hooks § Common fields (`timeout`), § PermissionRequest decision control | collector side: `app.test.ts` over HTTP; terminal side **unverified (S7b, R34)** | unverified |
 | Subagent attribution | `agent_id` only inside subagents; `agent_type` also on the main thread under `--agent` (S1's main thread carried `ui-color-palette:uicper`), so AgentDeck takes subagent types from `SubagentStart` only | hooks § Common input fields | spike S1 | — |
 | Stop / SubagentStop | `last_assistant_message`, `stop_hook_active`, `background_tasks` | hooks § Stop input | spike S1 | — |
 | TaskCreated / TaskCompleted | `task_id`, `task_subject`, `task_description` | hooks § TaskCreated input | spike S1 | — |
@@ -55,11 +56,14 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | `Workspace not trusted. Run \`claude\` in <path> once and accept the trust prompt, then retry.` (exit 1) | errors index, spike S6 | spike |
 | `claude logs <id>` (ANSI screen dump) | cli-reference | spike S7 |
 | `claude stop|kill <id>`, `claude rm <id>` | cli-reference | spike S7 |
-| `claude attach <id|name>` | cli-reference | **unverified (M4)** |
+| `claude attach <id|name>` ("Open the background session in this terminal") | cli-reference, `claude attach --help` | docs (help text); a real attach is still to run by hand. The console window it opens in without Windows Terminal was probed (D-095) |
+| `--agent <name>` takes built-in and custom subagents | sub-agents § Invoke subagents explicitly (page summary) | docs (summary, not verbatim) |
+| `@agent-<name>` in a prompt invokes that subagent | sub-agents § Invoke subagents explicitly (page summary) | **unverified**: run one mention by hand |
+| Project `.claude/agents` beats `~/.claude/agents` on a name clash | sub-agents § Choose the subagent scope | docs |
 | `claude respawn <id>` | cli-reference | docs (not used) |
 | `--effort` ∈ low, medium, high, xhigh, max (+ `ultracode`) | `claude --help`, cli-reference | docs |
 | `claude --resume <sessionId>` | sessions § Resume by session ID | docs |
-| `claude --desktop --resume <id>` | `claude --help` | **unverified (M4)** |
+| `claude --desktop --resume <id>` | `claude --help` ("Open in the Claude Desktop app instead of the terminal (with --continue or --resume <id> to pick the session)") | docs (help text); not run against a Desktop session yet |
 
 ## OpenTelemetry
 | Interface | Source | 2.1.318 |

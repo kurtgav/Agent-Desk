@@ -10,8 +10,12 @@ const REQUEST_TIMEOUT_MS = 10_000
 
 export interface Handlers {
   token: string
-  /** Called after the 200 is sent (D-029): Claude Code never waits on our processing. */
-  onHook(raw: string, receivedAt: number): void
+  /**
+   * Must only queue the body (D-029): Claude Code never waits on our processing. The one exception is a request
+   * held for remote approvals (ADR-0006): the reply then waits for the promise, whose value is the JSON body
+   * (undefined = empty). `gone` aborts when the connection closes first.
+   */
+  onHook(raw: string, receivedAt: number, gone: AbortSignal): Promise<unknown> | void
   snapshot(): unknown
 }
 
@@ -58,9 +62,13 @@ function handler(h: Handlers, port: () => number) {
     const url = req.url ?? '/'
     if (req.method === 'POST' && url === '/hooks') {
       return readBody(req, res, (raw) => {
-        const receivedAt = Date.now()
-        reply(res, 200) // empty body = success, no decision (D-029)
-        h.onHook(raw, receivedAt)
+        const gone = new AbortController()
+        const held = h.onHook(raw, Date.now(), gone.signal)
+        if (!held) return reply(res, 200) // empty body = success, no decision (D-029); the body was only queued
+        res.once('close', () => gone.abort()) // also fires after our reply; the hold is settled by then
+        void held.then((body) => {
+          if (!res.destroyed && !res.writableEnded) reply(res, 200, body)
+        })
       })
     }
     if (req.method === 'GET' && url === '/health') return reply(res, 200, { app: 'agentdeck', pid: process.pid })

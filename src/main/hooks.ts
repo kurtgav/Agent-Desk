@@ -1,5 +1,5 @@
 // ADR-0005 integration operations: state, dry run, install, uninstall. No electron import: unit-testable.
-import type { AppStatus, HooksPreview, HooksResult } from '@shared/bridge'
+import type { AppStatus, HooksPreview, HooksResult, RemoteApprovals } from '@shared/bridge'
 import { inspect, planDiff, planInstall, planUninstall, shapeKey, type HookTarget, type Plan } from './hooks-install'
 import { readText, writeSettings } from './settings-writer'
 
@@ -10,8 +10,11 @@ export interface HookPaths {
   backups: string
 }
 
+/** ADR-0006: remote approvals change one thing in the entries, the PermissionRequest timeout: the wait plus 10 s. */
+export const hookOptions = (ra: RemoteApprovals): Omit<HookTarget, 'port' | 'token'> => (ra.enabled ? { permissionTimeoutSec: ra.waitSec + 10 } : {})
+
 /** ADR-0005 § 4: the user's OK covers this entry shape; when the shape changes, the diff is shown again. */
-export const SHAPE = shapeKey({})
+export const shapeFor = (ra: RemoteApprovals): string => shapeKey(hookOptions(ra))
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 

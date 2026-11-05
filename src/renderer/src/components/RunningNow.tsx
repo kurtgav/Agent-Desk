@@ -4,7 +4,7 @@ import { useUi } from '@/store'
 import { duration } from '@/lib/format'
 import { projectName, running } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, pending } from './ui'
+import { Button, Card, CardHeader, Inline } from './ui'
 
 const MAX_ROWS = 4
 
@@ -44,12 +44,18 @@ function Progress({ session, now }: { session: Session; now: number }) {
 
 function Row({ session, now }: { session: Session; now: number }) {
   const plan = session.plan
+  const open = useUi((s) => s.openDrawer)
   return (
     <li className="border-t border-rule px-4 py-[9px]">
-      <div className="flex items-center gap-3">
+      {/* The name is the button; its ::after covers the row, so the whole row opens the drawer and the bar keeps its role. */}
+      <div className="relative -mx-2 flex items-center gap-3 rounded-tile px-2 has-[button:hover]:bg-ground">
         <Avatar seed={session.name} size={28} className="flex-none" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium leading-5">{session.name}</p>
+          <p className="truncate text-[14px] font-medium leading-5">
+            <button type="button" onClick={() => open(session.id)} className="text-left outline-none after:absolute after:inset-0 after:rounded-tile focus-visible:after:ring-2 focus-visible:after:ring-accent">
+              {session.name}
+            </button>
+          </p>
           <p className="truncate text-[12px] leading-4 text-muted">
             <Inline text={session.activity} />
             {plan && ` · Step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`} · {projectName(session.cwd)}
@@ -77,6 +83,7 @@ function Row({ session, now }: { session: Session; now: number }) {
 export function RunningNow({ className }: { className?: string }) {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
+  const go = useUi((s) => s.go)
   const sessions = running(snapshot)
   return (
     <Card aria-labelledby="running-now" className={className}>
@@ -86,11 +93,9 @@ export function RunningNow({ className }: { className?: string }) {
         count={sessions.length}
         countLabel="active"
         action={
-          <Hint label={PENDING_LABEL.M4}>
-            <Button variant="ghost" size="sm" {...pending('M4')}>
-              View all
-            </Button>
-          </Hint>
+          <Button variant="ghost" size="sm" onClick={() => go({ page: 'sessions', active: true })}>
+            View all
+          </Button>
         }
       />
       {sessions.length ? (

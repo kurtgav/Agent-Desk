@@ -1,4 +1,5 @@
-import type { ChangedFile, Snapshot } from '@shared/snapshot'
+import type { AuditRow, History, SessionDetail } from '@shared/detail'
+import type { ChangedFile, Session, Snapshot } from '@shared/snapshot'
 
 /**
  * Demo data for M1 (ADR-0011, D-031): sample sessions shaped like the S1 fixtures, with
@@ -132,5 +133,33 @@ export function demoSnapshot(now: number): Snapshot {
     usage: { todayTokens: 1_840_000, weekTokens: 9_620_000, todayCostUsd: 4.12, weekCostUsd: 23.8, weeklyBudgetUsd: 40 },
     recentAgentTypes: ['Explore', 'Plan', 'code-reviewer', 'tdd-guide'],
     agentDefinitionCount: 24
+  }
+}
+
+/** The drawer for a demo session, built from the same rows Home shows (ADR-0011); nothing is invented beyond them. */
+export function demoDetail(session: Session, snapshot: Snapshot): SessionDetail {
+  const timeline = [
+    { id: `${session.id}-now`, ts: session.lastEventAt, kind: 'tool.started', agentType: null, summary: session.activity },
+    ...session.subagents.map((a) => ({ id: a.id, ts: a.startedAt, kind: 'subagent.started', agentType: a.agentType, summary: `Started ${a.agentType}: ${a.task}` })),
+    { id: `${session.id}-start`, ts: session.startedAt, kind: 'session.prompt', agentType: null, summary: 'You sent a prompt' }
+  ].sort((a, b) => b.ts - a.ts)
+  const plan = session.plan
+  const tasks = plan ? Array.from({ length: plan.total }, (_, i) => ({ id: `${session.id}-t${i}`, subject: `Step ${i + 1}`, done: i < plan.done })) : []
+  return { session, timeline, tasks, files: snapshot.files.filter((f) => f.sessionId === session.id), finalMessage: null }
+}
+
+/** Activity and the audit log for demo mode: every demo session's timeline, and two sample settled approvals. */
+export function demoHistory(snapshot: Snapshot): History {
+  const activity = snapshot.sessions
+    .flatMap((s) => demoDetail(s, snapshot).timeline.map((e) => ({ ...e, sessionId: s.id })))
+    .sort((a, b) => b.ts - a.ts)
+  const at = snapshot.generatedAt
+  const row = (sessionId: string, title: string, outcome: AuditRow['outcome'], minutes: number, waitSec: number): AuditRow => ({
+    ts: Math.round(at - minutes * MIN), requestedAt: Math.round(at - minutes * MIN - waitSec * 1000), itemId: `${sessionId}-${minutes}`,
+    sessionId, agentId: null, toolName: 'Bash', title, riskFlags: [], inputHash: 'demo', outcome
+  })
+  return {
+    activity,
+    audit: [row('s-auth', 'Run `npm test -- auth`', 'approved', 14, 6), row('s-seo', 'Run `npx lighthouse https://example.com/pricing`', 'timed-out', 190, 60)]
   }
 }

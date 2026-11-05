@@ -18,11 +18,21 @@ const bridge: AgentDeckBridge = {
   onStatus: (listener) => on(IPC.statusPush, listener),
   onFocusItem: (listener) => on(IPC.focusItem, listener),
   dismiss: (id) => ipcRenderer.invoke(IPC.dismiss, id),
+  decide: (itemId, verdict) => ipcRenderer.invoke(IPC.decide, itemId, verdict),
   pauseNotifications: (until) => ipcRenderer.invoke(IPC.pause, until),
-  previewInstall: () => ipcRenderer.invoke(IPC.previewInstall),
+  previewInstall: (remoteApprovals) => ipcRenderer.invoke(IPC.previewInstall, remoteApprovals),
   previewUninstall: () => ipcRenderer.invoke(IPC.previewUninstall),
-  installHooks: () => ipcRenderer.invoke(IPC.install),
-  uninstallHooks: () => ipcRenderer.invoke(IPC.uninstall)
+  installHooks: (remoteApprovals) => ipcRenderer.invoke(IPC.install, remoteApprovals),
+  uninstallHooks: () => ipcRenderer.invoke(IPC.uninstall),
+  getDetail: (sessionId) => ipcRenderer.invoke(IPC.detail, sessionId),
+  getHistory: () => ipcRenderer.invoke(IPC.history),
+  act: (action, sessionId) => ipcRenderer.invoke(IPC.act, action, sessionId),
+  logs: (sessionId) => ipcRenderer.invoke(IPC.logs, sessionId),
+  openFile: (path) => ipcRenderer.invoke(IPC.openFile, path),
+  dispatch: (req) => ipcRenderer.invoke(IPC.dispatch, req),
+  chooseFolder: () => ipcRenderer.invoke(IPC.chooseFolder),
+  runClaudeIn: (cwd) => ipcRenderer.invoke(IPC.runClaudeIn, cwd),
+  listAgents: (cwd) => ipcRenderer.invoke(IPC.listAgents, cwd)
 }
 
 contextBridge.exposeInMainWorld('agentdeck', bridge)

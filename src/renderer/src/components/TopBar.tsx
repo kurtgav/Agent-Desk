@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { ChevronRight, Ellipsis, House, Plus, Search } from 'lucide-react'
 import type { PauseChoice } from '@shared/bridge'
-import { useUi } from '@/store'
-import { running } from '@/lib/selectors'
+import { HOME, useUi } from '@/store'
+import { projectName, running } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { IntegrationDialog, type IntegrationMode } from './Integration'
-import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, cn, pending, type Milestone } from './ui'
+import { IntegrationDialog } from './Integration'
+import { PAGE_TITLE } from './pages/Page'
+import { focusComposer } from './Sidebar'
+import { Button, Hint, IconButton, PendingMenuItem, cn, type Milestone } from './ui'
 
 const MENU_ITEMS: [string, Milestone][] = [
   ['Diagnostics', 'M5'],
@@ -99,12 +101,18 @@ function PauseMenu() {
 
 function ActiveAgents() {
   const active = running(useUi((s) => s.snapshot))
+  const go = useUi((s) => s.go)
   const shown = active.slice(0, 3)
   const more = active.length - shown.length
   if (!active.length) return null
   return (
-    <Hint label={`${active.length} active sessions. ${PENDING_LABEL.M4}`}>
-      <button type="button" aria-label={`${active.length} active sessions`} {...pending('M4')} className="flex items-center rounded-full p-0.5 hover:bg-active">
+    <Hint label={`${active.length} active sessions. Show them in Sessions.`}>
+      <button
+        type="button"
+        aria-label={`${active.length} active sessions`}
+        onClick={() => go({ page: 'sessions', active: true })}
+        className="flex items-center rounded-full p-0.5 transition-[background-color] duration-150 hover:bg-active"
+      >
         {shown.map((x, i) => (
           <span key={x.id} className={i ? '-ml-1.5' : ''}>
             <span className="grid size-7 place-items-center rounded-full bg-surface">
@@ -122,29 +130,60 @@ function ActiveAgents() {
   )
 }
 
+/** UI_MAP § Top bar: Home, then the list page, then the project a Sessions list is filtered to. */
+function Breadcrumb() {
+  const nav = useUi((s) => s.nav)
+  const go = useUi((s) => s.go)
+  const trail = [PAGE_TITLE[nav.page], ...(nav.page === 'sessions' && nav.project ? [projectName(nav.project)] : [])]
+  return (
+    <nav aria-label="Breadcrumb" className="app-no-drag flex min-w-0 items-center gap-1.5 text-[14px] font-medium">
+      <House size={16} strokeWidth={1.75} className="flex-none text-muted" />
+      {nav.page === 'home' ? (
+        <span aria-current="page">Home</span>
+      ) : (
+        <>
+          <button type="button" onClick={() => go(HOME)} className="rounded-md px-1 text-muted transition-colors duration-150 hover:text-ink">
+            Home
+          </button>
+          {trail.map((t, i) => (
+            <span key={i} className="flex min-w-0 items-center gap-1.5">
+              <ChevronRight size={14} strokeWidth={1.75} className="flex-none text-muted" aria-hidden />
+              {i === trail.length - 1 ? (
+                <span aria-current="page" className="truncate">{t}</span>
+              ) : (
+                <button type="button" onClick={() => go({ page: nav.page })} className="truncate rounded-md px-1 text-muted transition-colors duration-150 hover:text-ink">
+                  {t}
+                </button>
+              )}
+            </span>
+          ))}
+        </>
+      )}
+    </nav>
+  )
+}
+
 export function TopBar() {
   const mode = useUi((s) => s.snapshot.mode)
   const live = useUi((s) => s.status !== null)
-  const [dialog, setDialog] = useState<IntegrationMode | null>(null)
+  const dialog = useUi((s) => s.integration)
+  const setDialog = useUi((s) => s.setIntegration)
+  const openPalette = useUi((s) => s.setPalette)
   return (
     <header className="app-drag caption-inset flex h-12 flex-none items-center gap-3 border-b border-line bg-surface pl-4">
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[14px] font-medium">
-        <House size={16} strokeWidth={1.75} className="text-muted" />
-        <span aria-current="page">Home</span>
-      </nav>
+      <Breadcrumb />
 
       <div className="flex flex-1 justify-center">
-        <Hint label={`Search: ${PENDING_LABEL.M4}`}>
-          <button
-            type="button"
-            {...pending('M4')}
-            className="app-no-drag flex h-8 w-[300px] items-center gap-2 rounded-full bg-well px-3 text-[13px] text-muted"
-          >
-            <Search size={14} strokeWidth={1.75} />
-            Search sessions, projects, files
-            <kbd className="ml-auto font-sans text-[12px]">Ctrl K</kbd>
-          </button>
-        </Hint>
+        <button
+          type="button"
+          aria-keyshortcuts="Control+K"
+          onClick={() => openPalette(true)}
+          className="app-no-drag flex h-8 w-[300px] items-center gap-2 rounded-full bg-well px-3 text-[13px] text-muted transition-[background-color,color] duration-150 hover:bg-active hover:text-ink"
+        >
+          <Search size={14} strokeWidth={1.75} />
+          Search sessions, projects, files
+          <kbd className="ml-auto font-sans text-[12px]">Ctrl K</kbd>
+        </button>
       </div>
 
       <div className="app-no-drag flex items-center gap-2">
@@ -159,7 +198,7 @@ export function TopBar() {
         )}
         <LiveChip onRepair={() => setDialog('install')} />
         <ActiveAgents />
-        <Button onClick={() => document.getElementById('composer-input')?.focus()}>
+        <Button onClick={focusComposer}>
           <Plus size={15} strokeWidth={1.75} />
           New task
         </Button>
@@ -172,6 +211,11 @@ export function TopBar() {
           <Menu.Portal>
             <Menu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
               <PauseMenu />
+              {live && (
+                <Menu.Item className={ITEM} onSelect={() => setDialog('install')}>
+                  Remote approvals…
+                </Menu.Item>
+              )}
               {live && (
                 <Menu.Item className={ITEM} onSelect={() => setDialog('uninstall')}>
                   Uninstall integration…

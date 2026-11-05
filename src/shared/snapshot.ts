@@ -82,6 +82,10 @@ export const Usage = z.object({
 })
 export type Usage = z.infer<typeof Usage>
 
+/** D-046: the snapshot keeps the newest 50 sessions and the newest 200 changed files; the list pages say so. */
+export const SNAPSHOT_SESSIONS_MAX = 50
+export const SNAPSHOT_FILES_MAX = 200
+
 export const Snapshot = z.object({
   mode: z.enum(['demo', 'live']),
   generatedAt: Ts,

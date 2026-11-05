@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_STALL,
   FAST_POLL_MS,
+  answer,
   approvalTitle,
   askedQuestion,
   attend,
@@ -327,6 +328,18 @@ describe('P3 possibly stuck and Dismiss (test 9)', () => {
 
     const p1 = new Run().feed(bash(1_000, 'tool.started', 'ls'), bash(1_100, 'permission.requested', 'ls', null))
     expect(dismiss(p1.attention, p1.open[0]!.id, 1_200).state).toBe(p1.attention)
+  })
+})
+
+describe('answer: Approve/Reject in AgentDeck (ADR-0006)', () => {
+  it('closes a held approval at once, by agentdeck; an unheld one stays for the terminal', () => {
+    const r = new Run().feed(bash(1_000, 'tool.started', 'ls'), bash(1_100, 'permission.requested', 'ls', null))
+    const id = r.open[0]!.id
+    expect(answer(r.attention, id, 1_200).closed).toEqual([])
+    const held: AttentionState = { ...r.attention, open: r.attention.open.map((i) => ({ ...i, held: true })) }
+    const a = answer(held, id, 1_200)
+    expect(a.state.open).toEqual([])
+    expect(a.closed).toMatchObject([{ at: 1_200, by: 'agentdeck', state: 'resolved' }])
   })
 })
 

@@ -61,7 +61,7 @@ export function Hint({ label, children, side = 'bottom' }: { label: ReactNode; c
   )
 }
 
-export type Milestone = 'M4' | 'M5'
+export type Milestone = 'M5'
 
 /**
  * A control whose backing arrives in a later milestone (D-033). It keeps its look, explains
@@ -76,7 +76,6 @@ export function pending(m: Milestone) {
 }
 
 export const PENDING_LABEL: Record<Milestone, string> = {
-  M4: 'Arrives with lists and actions (M4)', // D-055
   M5: 'Arrives with settings and diagnostics (M5)'
 }
 

@@ -167,6 +167,48 @@ describe('Store', () => {
       expect(p1.tick(t0 + 400 + 60_001, cfg)).toBe(true) // working, nothing in flight, quiet for over N
       expect(p1.snapshot(t0 + 400 + 60_001, EXTRAS).attention).toEqual([expect.objectContaining({ priority: 3, kind: 'stuck' })])
     })
+
+    describe('held approvals (ADR-0006)', () => {
+      const held = (store: Store) => {
+        store.ingest([hook('UserPromptSubmit', t0, { prompt: 'go' }), hook('PreToolUse', t0 + 100, pre)])
+        const item = store.holdFor(hook('PermissionRequest', t0 + 200, { tool_name: 'Bash', tool_input: pre.tool_input }))!
+        expect(store.setHeld(item.id, true, 'Waits here.')).toBe(true)
+        return item
+      }
+
+      it('holdFor returns the approval the request opened; an answer closes it by agentdeck and the audit row stays', () => {
+        const file = tempDb()
+        const store = open(file)
+        const item = held(store)
+        expect(item).toMatchObject({ kind: 'approval', title: 'Run `git push --force`', riskFlags: ['Force push'] })
+        expect(store.snapshot(t0 + 200, EXTRAS).attention).toEqual([expect.objectContaining({ id: item.id, held: true, hint: 'Waits here.' })])
+        expect(store.setHeld(item.id, true, 'Waits here.')).toBe(false) // no change
+
+        expect(store.answer(item.id, t0 + 300)).toBe(true)
+        expect(store.isOpen(item.id)).toBe(false)
+        const row = { itemId: item.id, sessionId: 'a', agentId: null, toolName: 'Bash', title: item.title, riskFlags: item.riskFlags, inputHash: 'h', requestedAt: t0 + 200, ts: t0 + 300, outcome: 'approved' as const }
+        store.audit(row)
+        expect(store.auditLog(10)).toEqual([row])
+        const db = new DatabaseSync(file)
+        expect(db.prepare('SELECT resolved_by FROM attention_items').all()).toEqual([{ resolved_by: 'agentdeck' }])
+        db.close()
+        store.prune(t0 + 300 + RETENTION_MS + 1)
+        expect(store.auditLog(10)).toEqual([])
+      })
+
+      it('only a held item can be answered, and no hold survives a restart', () => {
+        const file = tempDb()
+        const first = open(file)
+        const item = held(first)
+        expect(first.setHeld(item.id, false, null)).toBe(true)
+        expect(first.answer(item.id, t0 + 300)).toBe(false) // the terminal has it now
+        first.setHeld(item.id, true, 'Waits here.')
+        first.close()
+        stores.pop()
+        const again = open(file, t0 + 1_000)
+        expect(again.snapshot(t0 + 1_000, EXTRAS).attention).toEqual([expect.objectContaining({ id: item.id, held: false, hint: null })])
+      })
+    })
   })
 
   it('ends a working stretch at its last event across a restart, not at the next launch (D-057)', () => {
@@ -211,5 +253,54 @@ describe('weekStart (D-008)', () => {
     expect([d.getDay(), d.getHours(), d.getMinutes(), d.getDate()]).toEqual([1, 0, 0, 2])
     expect(weekStart(new Date(2026, 10, 2, 0, 0).getTime())).toBe(new Date(2026, 10, 2).getTime())
     expect(new Date(weekStart(new Date(2026, 10, 8, 23).getTime())).getDate()).toBe(2) // Sunday belongs to the week before
+  })
+})
+
+describe('Store.detail (UI_MAP § Session drawer)', () => {
+  const t0 = Date.UTC(2026, 10, 3, 9)
+  const hook = (kind: string, ts: number, extra: Record<string, unknown> = {}) =>
+    normalizeHook(JSON.stringify({ session_id: 'd', hook_event_name: kind, cwd: 'D:\\p', ...extra }), ts)!
+
+  it('serves the newest events first, the plan, the changed files and the main agent final message', () => {
+    const store = open(':memory:', t0)
+    store.ingest([
+      hook('UserPromptSubmit', t0, { prompt: 'go' }),
+      hook('TaskCreated', t0 + 10, { task_id: '1', task_subject: 'Write the test' }),
+      hook('TaskCreated', t0 + 20, { task_id: '2', task_subject: 'Fix the bug' }),
+      hook('PreToolUse', t0 + 30, { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: 'D:\\p\\a.ts', old_string: 'x', new_string: 'y' } }),
+      hook('PostToolUse', t0 + 40, { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: 'D:\\p\\a.ts', old_string: 'x', new_string: 'y' }, tool_response: {} }),
+      hook('TaskCompleted', t0 + 50, { task_id: '1', task_subject: 'Write the test' }),
+      hook('SubagentStop', t0 + 60, { agent_id: 'a1', agent_type: 'Explore', last_assistant_message: 'Subagent report' }),
+      hook('Stop', t0 + 70, { stop_hook_active: false, last_assistant_message: 'All green.' })
+    ])
+    const d = store.detail('d')!
+    expect(d.session.id).toBe('d')
+    expect(d.timeline.map((e) => e.kind)).toEqual([
+      'turn.stopped', 'subagent.stopped', 'task.completed', 'tool.finished', 'tool.started', 'task.created', 'task.created', 'session.prompt'
+    ])
+    expect(d.timeline[1]).toMatchObject({ agentType: 'Explore' })
+    expect(d.tasks).toEqual([
+      { id: '1', subject: 'Write the test', done: true },
+      { id: '2', subject: 'Fix the bug', done: false }
+    ])
+    expect(d.files.map((f) => [f.path, f.tool])).toEqual([['D:\\p\\a.ts', 'Edit']])
+    expect(d.finalMessage).toBe('All green.') // the subagent's report is not the session's
+  })
+
+  it('is null for a session it never saw', () => {
+    expect(open(':memory:', t0).detail('nope')).toBeNull()
+  })
+
+  it('serves activity across sessions, newest first, capped', () => {
+    const store = open(':memory:', t0)
+    store.ingest([
+      hook('UserPromptSubmit', t0, { prompt: 'go' }),
+      normalizeHook(JSON.stringify({ session_id: 'e', hook_event_name: 'UserPromptSubmit', cwd: 'D:\\q', prompt: 'hi' }), t0 + 10)!,
+      hook('Stop', t0 + 20, { stop_hook_active: false, last_assistant_message: 'Done.' })
+    ])
+    expect(store.activity(10).map((e) => [e.sessionId, e.kind])).toEqual([
+      ['d', 'turn.stopped'], ['e', 'session.prompt'], ['d', 'session.prompt']
+    ])
+    expect(store.activity(1)).toHaveLength(1)
   })
 })

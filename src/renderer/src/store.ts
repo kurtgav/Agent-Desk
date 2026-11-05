@@ -1,10 +1,9 @@
 import { create } from 'zustand'
-import type { AppStatus } from '@shared/bridge'
+import { EFFORTS, type AppStatus, type Effort } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from './demo/snapshot'
+import type { IntegrationMode } from './components/Integration'
 
-export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-export type Effort = (typeof EFFORTS)[number]
 export type Outcome = 'approved' | 'rejected' | 'dismissed'
 
 const SIDEBAR_KEY = 'agentdeck.sidebarCollapsed'
@@ -20,6 +19,16 @@ function readCollapsed(): boolean {
 /** Live data only: `connecting` before the collector's first snapshot, `down` while main restarts it (D-059). */
 export type Link = 'connecting' | 'up' | 'down'
 
+export type Page = 'home' | 'sessions' | 'approvals' | 'files' | 'activity' | 'agents'
+/** Where the window is (UI_MAP § Sidebar). The extras preset a list page's filters: Sessions by status or project, Agents by name. */
+export interface Nav {
+  page: Page
+  active?: boolean
+  project?: string
+  query?: string
+}
+export const HOME: Nav = { page: 'home' }
+
 interface UiState {
   snapshot: Snapshot
   link: Link
@@ -32,20 +41,37 @@ interface UiState {
   composerCwd: string | null
   /** `--agent` choice; null = Claude Code's default. */
   composerAgent: string | null
+  /** The composer's draft. */
+  composerText: string
+  setComposerText(text: string): void
   announcement: string
   /** Hooks and notification state from main; null in demo and before main answers. */
   status: AppStatus | null
   /** A toast was clicked: Needs you reveals this item. */
   focusedItem: string | null
+  /** Session shown in the drawer (UI_MAP § Session drawer); null = closed. */
+  drawer: string | null
+  /** The outcome of the last action, shown briefly at the bottom of the window. */
+  notice: { text: string; tone: 'ok' | 'error'; at: number } | null
+  nav: Nav
+  /** The Ctrl+K command palette. */
+  palette: boolean
+  /** The ⋯ menu's install / uninstall dialog, also opened from the palette. */
+  integration: IntegrationMode | null
+  go(nav: Nav): void
+  setPalette(open: boolean): void
+  setIntegration(mode: IntegrationMode | null): void
   tick(now: number): void
+  openDrawer(sessionId: string | null): void
+  notify(text: string, tone?: 'ok' | 'error'): void
   toggleSidebar(): void
   cycleEffort(): void
   setComposerCwd(cwd: string): void
   setComposerAgent(agent: string | null): void
   focusItem(id: string | null): void
   /**
-   * Live: Dismiss goes to the attention engine; the next snapshot drops the item. Approve/Reject on live items arrive
-   * with held approvals (M4). Demo: answering removes the item locally; nothing is sent anywhere (D-035).
+   * Live: Dismiss goes to the attention engine; the next snapshot drops the item. Live Approve/Reject go through
+   * `answerItem` (lib/act). Demo: answering removes the item locally; nothing is sent anywhere (D-035).
    */
   resolve(itemId: string, outcome: Outcome): void
 }
@@ -90,7 +116,8 @@ export function connect(): () => void {
       statusPushed = true
       if (live) useUi.setState({ status })
     }),
-    bridge.onFocusItem((id) => useUi.setState({ focusedItem: id }))
+    // Needs you lives on Home, so a clicked toast goes there to reveal its row.
+    bridge.onFocusItem((id) => useUi.setState({ focusedItem: id, nav: HOME, drawer: null }))
   ]
   void bridge
     .getAppInfo()
@@ -119,10 +146,22 @@ export const useUi = create<UiState>((set) => ({
   effort: 'high',
   composerCwd: null,
   composerAgent: null,
+  composerText: '',
+  setComposerText: (composerText) => set({ composerText }),
   announcement: '',
   status: null,
   focusedItem: null,
+  drawer: null,
+  notice: null,
+  nav: HOME,
+  palette: false,
+  integration: null,
+  go: (nav) => set({ nav, drawer: null }), // the palette can navigate from over the drawer
+  setPalette: (palette) => set({ palette }),
+  setIntegration: (integration) => set({ integration }),
   tick: (now) => set({ now }),
+  openDrawer: (sessionId) => set({ drawer: sessionId }),
+  notify: (text, tone = 'ok') => set({ notice: { text, tone, at: Date.now() } }),
   focusItem: (id) => set({ focusedItem: id }),
   toggleSidebar: () =>
     set((s) => {

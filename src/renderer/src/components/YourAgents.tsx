@@ -1,13 +1,14 @@
 import { useUi } from '@/store'
 import { projectName, recentSessions } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, PENDING_LABEL, StatusPill, cn, pending } from './ui'
+import { Button, Card, CardHeader, StatusPill, cn } from './ui'
 
 const MAX_TILES = 6
 
 export function YourAgents({ className }: { className?: string }) {
   const snapshot = useUi((s) => s.snapshot)
   const sessions = recentSessions(snapshot, MAX_TILES)
+  const open = useUi((s) => s.openDrawer)
   return (
     <Card aria-labelledby="your-agents" className={cn('flex flex-col', className)}>
       <CardHeader
@@ -16,20 +17,25 @@ export function YourAgents({ className }: { className?: string }) {
         count={snapshot.sessions.length}
         countLabel="sessions"
         action={
-          <Hint label={PENDING_LABEL.M4}>
-            <Button variant="ghost" size="sm" {...pending('M4')}>
-              See all
-            </Button>
-          </Hint>
+          <Button variant="ghost" size="sm" onClick={() => useUi.getState().go({ page: 'sessions' })}>
+            See all
+          </Button>
         }
       />
       {sessions.length ? (
         <ul className="grid grid-cols-3 gap-2 px-4 pb-4">
           {sessions.map((x) => (
-            <li key={x.id} className="flex min-w-0 flex-col items-start gap-1.5 rounded-tile bg-tile p-2.5" title={`${x.name} · ${projectName(x.cwd)}`}>
-              <Avatar seed={x.name} size={24} />
-              <span className="w-full truncate text-[13px] font-medium leading-4">{x.name}</span>
-              <StatusPill status={x.status} />
+            <li key={x.id} className="min-w-0">
+              <button
+                type="button"
+                onClick={() => open(x.id)}
+                title={`${x.name} · ${projectName(x.cwd)}`}
+                className="flex w-full min-w-0 flex-col items-start gap-1.5 rounded-tile bg-tile p-2.5 text-left transition-[background-color] duration-150 hover:bg-active active:scale-[0.96] motion-reduce:active:scale-100"
+              >
+                <Avatar seed={x.name} size={24} />
+                <span className="w-full truncate text-[13px] font-medium leading-4">{x.name}</span>
+                <StatusPill status={x.status} />
+              </button>
             </li>
           ))}
         </ul>

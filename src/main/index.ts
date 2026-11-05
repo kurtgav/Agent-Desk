@@ -1,15 +1,25 @@
 import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { app, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type Tray } from 'electron'
+import {
+  app, clipboard, dialog, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type OpenDialogOptions, type Tray
+} from 'electron'
 import { z } from 'zod'
-import { IPC, type AppInfo, type AppStatus, type HooksPreview, type HooksResult } from '@shared/bridge'
+import {
+  EFFORTS, IPC, PROMPT_MAX, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
+  type RemoteApprovals
+} from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
-import type { Snapshot } from '@shared/snapshot'
+import type { History, SessionDetail } from '@shared/detail'
+import type { Session, Snapshot } from '@shared/snapshot'
+import { resolveClaude } from '../collector/cli'
+import { act, LOCAL_PATH, logs, openFile, runClaudeIn, type ActionDeps } from './actions'
+import { agentList } from './agents'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
-import { readConfig, updateConfig } from './config'
-import { SHAPE, hooksState, install, previewInstall, previewUninstall, uninstall, type HookPaths } from './hooks'
+import { readConfig, remoteApprovals, updateConfig } from './config'
+import { NOT_KNOWN, dispatch, knownFolder, refusal } from './dispatch'
+import { hookOptions, hooksState, install, previewInstall, previewUninstall, shapeFor, uninstall, type HookPaths } from './hooks'
 import { settingsPath, type HookTarget } from './hooks-install'
 import { isPaused, notifyPrefs, tomorrowMorning, type NotifyPrefs } from './notify'
 import { registerAppScheme, serveRenderer } from './protocol'
@@ -60,9 +70,15 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     // Keep running in the tray: quitting happens only from the tray menu.
   })
-  app.on('will-quit', () => {
+  let closing = false
+  app.on('will-quit', (e) => {
+    if (closing) return
+    closing = true
     removeHooksForQuit()
-    collector?.stop()
+    if (!collector) return
+    // Quit waits up to 1 s, so held approvals get an empty reply and their audit rows (ADR-0006).
+    e.preventDefault()
+    void collector.stop().finally(() => app.quit())
   })
   void app.whenReady().then(start)
 }
@@ -73,7 +89,9 @@ function hookPaths(): HookPaths {
   return { settings: settingsPath(process.env, homedir()), backups: join(app.getPath('userData'), 'backups') }
 }
 
-const target = (): HookTarget | null => (port === null ? null : { port, token: hookToken() })
+const approvalsConfig = (): RemoteApprovals => remoteApprovals(readConfig(configFile()))
+
+const target = (ra = approvalsConfig()): HookTarget | null => (port === null ? null : { port, token: hookToken(), ...hookOptions(ra) })
 
 /**
  * The user OK'd this entry shape, for this settings.json, in the install dialog; launch then reuses that consent
@@ -81,7 +99,7 @@ const target = (): HookTarget | null => (port === null ? null : { port, token: h
  */
 function consented(): boolean {
   const c = readConfig(configFile())
-  return c.hooksConsent === SHAPE && c.hooksConsentPath === hookPaths().settings
+  return c.hooksConsent === shapeFor(remoteApprovals(c)) && c.hooksConsentPath === hookPaths().settings
 }
 
 function prefs(): NotifyPrefs {
@@ -90,7 +108,11 @@ function prefs(): NotifyPrefs {
 
 function refreshStatus(): AppStatus {
   const p = prefs()
-  status = { ...hooksState(hookPaths(), target()), pausedUntil: isPaused(p, Date.now()) ? p.pausedUntil : null }
+  const ra = approvalsConfig()
+  status = { ...hooksState(hookPaths(), target(ra)), pausedUntil: isPaused(p, Date.now()) ? p.pausedUntil : null, remoteApprovals: ra }
+  // ADR-0006: hold only while the entries that wait long enough are in place; otherwise Claude Code cuts in at 2 s.
+  const holding = !demo && ra.enabled && status.hooks === 'installed' && consented()
+  collector?.post({ type: 'approvals', enabled: holding, waitMs: ra.waitSec * 1000 })
   if (win && !win.isDestroyed()) win.webContents.send(IPC.statusPush, status)
   signals.render()
   return status
@@ -117,25 +139,40 @@ function removeHooksForQuit(): void {
 
 const NOT_READY = 'AgentDeck is still starting its collector. Try again in a moment.'
 
-function onInstall(): HooksResult {
-  const t = target()
+/** The install dialog's choice; written to config only together with the entries it shapes. */
+const withApprovals = (on: unknown): RemoteApprovals => ({ ...approvalsConfig(), enabled: z.boolean().parse(on) })
+
+function onInstall(on: unknown): HooksResult {
+  const ra = withApprovals(on)
+  const t = target(ra)
   if (demo || !t) return { ok: false, error: demo ? 'Turn demo data off first.' : NOT_READY }
   const r = install(hookPaths(), t)
-  if (r.ok) updateConfig(configFile(), { hooksConsent: SHAPE, hooksConsentPath: hookPaths().settings, hooksConsentAt: Date.now() })
+  if (r.ok) updateConfig(configFile(), { remoteApprovals: ra, hooksConsent: shapeFor(ra), hooksConsentPath: hookPaths().settings, hooksConsentAt: Date.now() })
   refreshStatus()
   return r
 }
 
 function onUninstall(): HooksResult {
   const r = uninstall(hookPaths())
-  if (r.ok) updateConfig(configFile(), { hooksConsent: null })
+  // A later install starts from "off" again (D-017): remote approvals need a fresh opt-in.
+  if (r.ok) updateConfig(configFile(), { hooksConsent: null, remoteApprovals: { ...approvalsConfig(), enabled: false } })
   refreshStatus()
   return r
 }
 
-function onPreviewInstall(): HooksPreview {
-  const t = target()
+function onPreviewInstall(on: unknown): HooksPreview {
+  const t = target(withApprovals(on))
   return t ? previewInstall(hookPaths(), t) : { ok: false, path: hookPaths().settings, error: NOT_READY }
+}
+
+/** ADR-0006: one click answers one held request. Only our page reaches this, and only through `handle`. */
+async function onDecide(id: unknown, verdict: unknown): Promise<ActionResult> {
+  if (demo) return DEMO_REFUSED
+  const itemId = z.string().min(1).max(64).parse(id)
+  const v = z.enum(['approve', 'reject']).parse(verdict)
+  if (!collector) return { ok: false, error: NOT_READY }
+  const m = await collector.request((reqId) => ({ type: 'decide', reqId, itemId, verdict: v }))
+  return m?.type === 'decided' ? m.result : { ok: false, error: 'AgentDeck did not hear back from its collector. If the terminal asks, answer it there.' }
 }
 
 // ── Notifications ──
@@ -159,6 +196,90 @@ function focusItem(id: string): void {
   }
   if (win?.webContents.isLoading()) win.webContents.once('did-finish-load', send)
   else send()
+}
+
+// ── Session actions (UI_MAP § Session drawer) ──
+
+let claudeCli: Promise<string | null> | null = null
+const actionDeps: ActionDeps = {
+  // Resolved once (ADR-0008); a miss is retried on the next action, so installing Claude Code needs no restart.
+  claude: () => {
+    const override = readConfig(configFile()).claudePath
+    claudeCli ??= resolveClaude(typeof override === 'string' ? override : undefined).then((p) => {
+      if (!p) claudeCli = null
+      return p
+    })
+    return claudeCli
+  },
+  copy: (text) => clipboard.writeText(text)
+}
+
+const SessionId = z.string().min(1).max(128)
+
+async function detail(sessionId: string): Promise<SessionDetail | null> {
+  if (demo || !collector) return null
+  const m = await collector.request((reqId) => ({ type: 'detail', reqId, sessionId }))
+  return m?.type === 'detail' ? m.detail : null
+}
+
+async function history(): Promise<History | null> {
+  if (demo || !collector) return null
+  const m = await collector.request((reqId) => ({ type: 'history', reqId }))
+  return m?.type === 'history' ? m.history : null
+}
+
+/** The session as the collector knows it: cwd and ids never come from the renderer. */
+async function sessionFor(id: string): Promise<Session | null> {
+  return latest?.sessions.find((s) => s.id === id) ?? (await detail(id))?.session ?? null
+}
+
+const UNKNOWN: ActionResult = { ok: false, error: 'AgentDeck does not know this session (any more).' }
+/** The renderer already runs nothing in demo (D-094); main refuses too, in case it is asked anyway. */
+const DEMO_REFUSED: ActionResult = { ok: false, error: 'Demo data: nothing was run.' }
+
+// ── Composer (brief § Composer) ──
+
+const configDir = (): string => process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+/** Folders picked with Browse… during this run. Dispatch also takes any folder a listed session runs in. */
+const picked = new Set<string>()
+const knownFolders = (): string[] => [...picked, ...(latest?.sessions.map((s) => s.cwd) ?? [])]
+const Folder = z.string().min(3).max(1024)
+
+async function agentsFor(cwd: string | null): Promise<AgentDef[]> {
+  if (demo) return []
+  const project = cwd && (await knownFolder(cwd, knownFolders())) ? join(cwd, '.claude', 'agents') : null
+  return agentList(join(configDir(), 'agents'), project)
+}
+
+const Dispatch = z.object({
+  prompt: z.string().trim().min(1).max(PROMPT_MAX),
+  cwd: Folder,
+  agent: z.string().min(1).max(64).nullable(),
+  effort: z.enum(EFFORTS)
+})
+
+async function onDispatch(raw: unknown): Promise<DispatchResult> {
+  if (demo) return { ok: false, error: 'Demo data: nothing was dispatched.', untrusted: false }
+  const req = Dispatch.parse(raw)
+  const why = await refusal(req, knownFolders(), agentsFor)
+  return why ? { ok: false, error: why, untrusted: false } : dispatch(req, actionDeps)
+}
+
+async function onChooseFolder(): Promise<string | null> {
+  if (demo) return null
+  const opts: OpenDialogOptions = { title: 'Run the task in this folder', properties: ['openDirectory'] }
+  const r = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  const dir = r.canceled ? undefined : r.filePaths[0]
+  if (!dir) return null
+  // A network folder is returned so the composer can say why it won't run there, but it never becomes "known".
+  if (LOCAL_PATH.test(dir)) picked.add(dir)
+  return dir
+}
+
+async function onRunClaudeIn(cwd: unknown): Promise<ActionResult> {
+  if (demo) return DEMO_REFUSED
+  const dir = Folder.parse(cwd)
+  return (await knownFolder(dir, knownFolders())) ? runClaudeIn(dir, actionDeps) : { ok: false, error: NOT_KNOWN }
 }
 
 /** Only our own page may call into main (ADR-0010). */
@@ -189,7 +310,6 @@ function hookToken(): string {
 
 function startCollector(): void {
   const config = readConfig(configFile())
-  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   collector = superviseCollector(
     COLLECTOR_ENTRY,
     {
@@ -197,7 +317,7 @@ function startCollector(): void {
       dbPath: join(app.getPath('userData'), 'agentdeck.db'),
       token: hookToken(),
       ports: PORTS,
-      agentsDir: join(configDir, 'agents'),
+      agentsDir: join(configDir(), 'agents'),
       // AGENTDECK_POLL=0: smoke tests must not list the real sessions on the machine running them.
       claude: process.env.AGENTDECK_POLL === '0' ? false : typeof config.claudePath === 'string' ? config.claudePath : undefined
     },
@@ -225,7 +345,7 @@ function onCollectorMessage(m: FromCollector): void {
     latest = m.snapshot
     if (win && !win.isDestroyed()) win.webContents.send(IPC.snapshotPush, m.snapshot)
     signals.update(m.snapshot)
-  } else {
+  } else if (m.type === 'error') {
     console.error(`[collector] ${m.message}`)
   }
 }
@@ -289,7 +409,7 @@ function setDemo(on: boolean): void {
   updateConfig(configFile(), { demo: on })
   // Demo stops the collector, so our entries would point at a closed port: take them out until live is back.
   if (on) removeHooksForQuit()
-  collector?.stop()
+  void collector?.stop()
   collector = null
   latest = null
   port = null
@@ -312,10 +432,26 @@ function start(): void {
   handle(IPC.status, (): AppStatus => status ?? refreshStatus())
   handle(IPC.dismiss, (_e, id) => collector?.post({ type: 'dismiss', id: z.string().min(1).max(64).parse(id) }))
   handle(IPC.pause, (_e, choice) => setPause(z.enum(['hour', 'tomorrow']).nullable().parse(choice)))
-  handle(IPC.previewInstall, onPreviewInstall)
+  handle(IPC.decide, (_e, id, verdict) => onDecide(id, verdict))
+  handle(IPC.previewInstall, (_e, on) => onPreviewInstall(on))
   handle(IPC.previewUninstall, () => previewUninstall(hookPaths()))
-  handle(IPC.install, onInstall)
+  handle(IPC.install, (_e, on) => onInstall(on))
   handle(IPC.uninstall, onUninstall)
+  handle(IPC.detail, (_e, id) => detail(SessionId.parse(id)))
+  handle(IPC.history, () => history())
+  handle(IPC.act, async (_e, action, id) => {
+    const s = await sessionFor(SessionId.parse(id))
+    return s ? act(z.enum(['attach', 'stop', 'open-folder', 'open-desktop', 'copy-resume']).parse(action), s, actionDeps) : UNKNOWN
+  })
+  handle(IPC.logs, async (_e, id) => {
+    const s = await sessionFor(SessionId.parse(id))
+    return s ? logs(s, actionDeps) : UNKNOWN
+  })
+  handle(IPC.openFile, (_e, path) => (demo ? DEMO_REFUSED : openFile(z.string().min(3).max(1024).parse(path))))
+  handle(IPC.dispatch, (_e, req) => onDispatch(req))
+  handle(IPC.chooseFolder, onChooseFolder)
+  handle(IPC.runClaudeIn, (_e, cwd) => onRunClaudeIn(cwd))
+  handle(IPC.listAgents, (_e, cwd) => agentsFor(Folder.nullable().parse(cwd)))
   registerAutostartOnce(configFile())
 
   win = newWindow(process.argv.includes('--hidden'))
