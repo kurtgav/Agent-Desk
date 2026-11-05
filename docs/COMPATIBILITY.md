@@ -55,11 +55,11 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | `Workspace not trusted. Run \`claude\` in <path> once and accept the trust prompt, then retry.` (exit 1) | errors index, spike S6 | spike |
 | `claude logs <id>` (ANSI screen dump) | cli-reference | spike S7 |
 | `claude stop|kill <id>`, `claude rm <id>` | cli-reference | spike S7 |
-| `claude attach <id|name>` | cli-reference | **unverified (M4)** |
+| `claude attach <id|name>` ("Open the background session in this terminal") | cli-reference, `claude attach --help` | docs (help text); a real attach is still to run by hand |
 | `claude respawn <id>` | cli-reference | docs (not used) |
 | `--effort` ∈ low, medium, high, xhigh, max (+ `ultracode`) | `claude --help`, cli-reference | docs |
 | `claude --resume <sessionId>` | sessions § Resume by session ID | docs |
-| `claude --desktop --resume <id>` | `claude --help` | **unverified (M4)** |
+| `claude --desktop --resume <id>` | `claude --help` ("Open in the Claude Desktop app instead of the terminal (with --continue or --resume <id> to pick the session)") | docs (help text); not run against a Desktop session yet |
 
 ## OpenTelemetry
 | Interface | Source | 2.1.318 |
