@@ -20,6 +20,7 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | PermissionRequest input | `tool_name`, `tool_input`, `permission_suggestions`; **no `tool_use_id`** | hooks § PermissionRequest input | spike S4 | — |
 | No decision in a no-prompt session | tool denied | hooks § PermissionRequest | spike S4 | — |
 | Empty reply in an interactive session | normal dialog shows | hooks (implied, not stated) | **unverified (S7b)** | unverified |
+| Held PermissionRequest (remote approvals) | the session waits for our reply up to the entry's `timeout` (wait + 10 s), and its own prompt is deferred meanwhile | hooks § Common fields (`timeout`), § PermissionRequest decision control | collector side: `app.test.ts` over HTTP; terminal side **unverified (S7b, R34)** | unverified |
 | Subagent attribution | `agent_id` only inside subagents; `agent_type` also on the main thread under `--agent` (S1's main thread carried `ui-color-palette:uicper`), so AgentDeck takes subagent types from `SubagentStart` only | hooks § Common input fields | spike S1 | — |
 | Stop / SubagentStop | `last_assistant_message`, `stop_hook_active`, `background_tasks` | hooks § Stop input | spike S1 | — |
 | TaskCreated / TaskCompleted | `task_id`, `task_subject`, `task_description` | hooks § TaskCreated input | spike S1 | — |
