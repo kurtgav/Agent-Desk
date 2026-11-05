@@ -7,7 +7,7 @@ import type { Snapshot } from '@shared/snapshot'
 import { DEFAULT_STALL, type AttentionRecord, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
 import { resolveClaude, run } from './cli'
-import { Holds, type AuditRow } from './holds'
+import { Holds, faithfulPreview, type AuditRow } from './holds'
 import { normalizeHook } from './normalize'
 import { Poller, exePaths } from './poll'
 import { listen } from './server'
@@ -54,8 +54,20 @@ export interface Collector {
 }
 
 const TOO_LATE = 'This request no longer waits in AgentDeck: its time ran out, or it was answered. If its terminal still asks, answer it there.'
+const UNLOGGED = 'AgentDeck could not write this answer to its audit log, so it sent nothing. Answer in its terminal.'
 const heldHint = (waitMs: number): string => `Waits here up to ${Math.round(waitMs / 1000)} s, then its terminal asks.`
-const inputHash = (ev: AgentEvent): string => createHash('sha256').update(JSON.stringify(ev.payload.tool_input ?? null)).digest('hex')
+const inputHash = (input: unknown): string => createHash('sha256').update(JSON.stringify(input ?? null)).digest('hex')
+/** Waits for replies written in the same turn to leave before the sockets close (ADR-0006: quit sends empty replies). */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+/** `tool_input` exactly as Claude Code sent it: only to check the preview and hash it, never stored. */
+function rawInput(raw: string): unknown {
+  try {
+    return (JSON.parse(raw) as { tool_input?: unknown } | null)?.tool_input
+  } catch {
+    return undefined
+  }
+}
 
 /** Number of subagent definition files; read-only, documented location (sub-agents § scope). */
 function countAgents(dir: string | null): number {
@@ -96,13 +108,19 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       o.onError(err)
     }
   }
-  // Every hold ends in the audit log (ADR-0006). An answer closes its item; anything else leaves it to the terminal.
-  const holds = new Holds((row) =>
-    guarded(() => {
-      store.audit(row)
-      if (row.outcome === 'approved' || row.outcome === 'rejected') return store.answer(row.itemId, row.ts)
-      return store.setHeld(row.itemId, false, null)
-    })
+  // Every hold ends in the audit log (ADR-0006), written before the reply. An answer closes its item; anything else
+  // leaves it to the terminal.
+  const holds = new Holds(
+    (row) => {
+      try {
+        store.audit(row)
+        return true
+      } catch (err) {
+        o.onError(err)
+        return false
+      }
+    },
+    (row, answered) => guarded(() => (answered ? store.answer(row.itemId, row.ts) : store.setHeld(row.itemId, false, null)))
   )
   const ingest = (events: AgentEvent[]): void => guarded(() => store.ingest(events))
   if (o.claude !== false) {
@@ -160,6 +178,9 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       return null // the queue reports it
     }
     if (ev?.kind !== 'permission.requested') return null
+    const input = rawInput(raw)
+    // Only a request the row shows in full can be answered here (D-113); any other goes to its terminal at once.
+    if (!faithfulPreview(ev.toolName, input, ev.payload.tool_input)) return null
     drain() // earlier bodies first: events keep their arrival order
     let item: AttentionRecord | null = null
     try {
@@ -173,7 +194,7 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       return Promise.resolve(undefined)
     }
     const waiting = holds.add(
-      { itemId: item.id, sessionId: item.sessionId, agentId: item.agentId, toolName: item.toolName, title: item.title, riskFlags: item.riskFlags, inputHash: inputHash(ev), requestedAt: at },
+      { itemId: item.id, sessionId: item.sessionId, agentId: item.agentId, toolName: item.toolName, title: item.title, riskFlags: item.riskFlags, inputHash: inputHash(input), requestedAt: at },
       approvals.waitMs,
       gone
     )
@@ -232,11 +253,15 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       if (!cfg.enabled) holds.releaseAll() // turned off: what waits goes back to its terminal now
     },
     dismiss: (id) => guarded(() => store.dismiss(id, Date.now(), stallCfg)),
-    decide: (itemId, verdict) => (holds.decide(itemId, verdict) ? { ok: true } : { ok: false, error: TOO_LATE }),
+    decide: (itemId, verdict) => {
+      const r = holds.decide(itemId, verdict)
+      return r === 'sent' ? { ok: true } : { ok: false, error: r === 'gone' ? TOO_LATE : UNLOGGED }
+    },
     detail: (sessionId) => store.detail(sessionId),
     auditLog: (limit) => store.auditLog(limit),
     close: async () => {
       holds.releaseAll() // empty replies: the terminals ask instead
+      await flush()
       clearInterval(pruner)
       clearInterval(stallTimer)
       poller?.stop()

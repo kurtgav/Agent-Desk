@@ -8,12 +8,15 @@ export function restartDelay(attempt: number): number {
 const HEALTHY_MS = 30_000
 /** A request the collector hasn't answered by then resolves to null (it is busy, or restarting). */
 const REQUEST_TIMEOUT_MS = 5_000
+/** How long quit waits for the collector to answer held requests and close; then it is killed. */
+const STOP_GRACE_MS = 1_000
 
 export interface Supervisor {
   post(m: ToCollector): void
   /** Sends a request built around a fresh `reqId`; resolves with the reply, or null on timeout or exit. */
   request(build: (reqId: number) => ToCollector): Promise<FromCollector | null>
-  stop(): void
+  /** Asks the collector to close (held requests get their empty reply), kills it after 1 s at the latest. */
+  stop(): Promise<void>
 }
 
 /**
@@ -85,8 +88,20 @@ export function superviseCollector(
     stop: () => {
       stopped = true
       if (retry) clearTimeout(retry)
-      child?.kill()
+      const proc = child
       child = null
+      if (!proc) return Promise.resolve()
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          proc.kill()
+          resolve()
+        }, STOP_GRACE_MS)
+        proc.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+        proc.postMessage({ type: 'close' } satisfies ToCollector)
+      })
     }
   }
 }

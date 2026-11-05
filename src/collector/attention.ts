@@ -57,7 +57,7 @@ export const DEFAULT_STALL: StallConfig = { idleMs: 5 * 60_000, toolMs: 10 * 60_
 export const FAST_POLL_MS = 2 * 60_000
 
 const UNTIL_PROMPT = Number.MAX_SAFE_INTEGER
-const TITLE_MAX = 1_000
+export const TITLE_MAX = 1_000
 const REVIEW_TITLE_MAX = 160
 
 export const emptyAttention = (): AttentionState => ({ open: [], quiet: {} })

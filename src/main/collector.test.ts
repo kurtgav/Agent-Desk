@@ -6,7 +6,7 @@ import { restartDelay, superviseCollector } from './collector'
 
 vi.mock('electron', () => ({ utilityProcess: { fork: vi.fn() } }))
 
-describe('restartDelay (ARCHITECTURE § Crash restart)', () => {
+describe('restartDelay (ARCHITECTURE Â§ Crash restart)', () => {
   it('doubles from 500 ms and caps at 30 s', () => {
     expect([0, 1, 2, 3, 4, 5, 6, 7, 20].map(restartDelay)).toEqual([500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000])
   })
@@ -50,7 +50,7 @@ describe('Supervisor request/reply (D-089)', () => {
     procs[0]!.emit('message', { type: 'detail', reqId, detail: null })
     await expect(reply).resolves.toEqual({ type: 'detail', reqId, detail: null })
     expect(onMessage).toHaveBeenCalledTimes(1)
-    s.stop()
+    void s.stop()
   })
 
   it('resolves null after 5 s without a reply, and drops the late reply', async () => {
@@ -62,7 +62,7 @@ describe('Supervisor request/reply (D-089)', () => {
     await expect(reply).resolves.toBeNull()
     procs[0]!.emit('message', { type: 'detail', reqId, detail: null })
     expect(onMessage).not.toHaveBeenCalled()
-    s.stop()
+    void s.stop()
   })
 
   it('answers waiting requests with null when the collector exits, and replays only state (visibility, focus, approvals)', async () => {
@@ -79,7 +79,27 @@ describe('Supervisor request/reply (D-089)', () => {
     expect(onDown).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(500)
     expect(procs[1]!.sent).toEqual([init, { type: 'visible', visible: true }, { type: 'approvals', enabled: true, waitMs: 60_000 }])
-    s.stop()
+    void s.stop()
     await expect(s.request(detail)).resolves.toBeNull()
+  })
+
+  it('stop asks the collector to close, and kills it only if it is still there after 1 s (ADR-0006 quit)', async () => {
+    const onDown = vi.fn()
+    const s = superviseCollector('collector.js', init, vi.fn(), onDown)
+    const kill = vi.spyOn(procs[0]!, 'kill')
+    let done = false
+    void s.stop().then(() => (done = true))
+    expect(procs[0]!.sent.at(-1)).toEqual({ type: 'close' })
+    procs[0]!.emit('exit', 0) // it closed on its own
+    await vi.waitFor(() => expect(done).toBe(true))
+    expect(kill).not.toHaveBeenCalled()
+
+    const t = superviseCollector('collector.js', init, vi.fn(), onDown)
+    const stuck = t.stop()
+    vi.advanceTimersByTime(1_000)
+    await stuck
+    expect(procs[1]!.sent.at(-1)).toEqual({ type: 'close' })
+    expect(onDown).not.toHaveBeenCalled() // a stop is not a crash: no restart
+    expect(procs).toHaveLength(2)
   })
 })

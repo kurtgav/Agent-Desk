@@ -70,9 +70,15 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     // Keep running in the tray: quitting happens only from the tray menu.
   })
-  app.on('will-quit', () => {
+  let closing = false
+  app.on('will-quit', (e) => {
+    if (closing) return
+    closing = true
     removeHooksForQuit()
-    collector?.stop()
+    if (!collector) return
+    // Quit waits up to 1 s, so held approvals get an empty reply and their audit rows (ADR-0006).
+    e.preventDefault()
+    void collector.stop().finally(() => app.quit())
   })
   void app.whenReady().then(start)
 }
@@ -148,7 +154,8 @@ function onInstall(on: unknown): HooksResult {
 
 function onUninstall(): HooksResult {
   const r = uninstall(hookPaths())
-  if (r.ok) updateConfig(configFile(), { hooksConsent: null })
+  // A later install starts from "off" again (D-017): remote approvals need a fresh opt-in.
+  if (r.ok) updateConfig(configFile(), { hooksConsent: null, remoteApprovals: { ...approvalsConfig(), enabled: false } })
   refreshStatus()
   return r
 }
@@ -396,7 +403,7 @@ function setDemo(on: boolean): void {
   updateConfig(configFile(), { demo: on })
   // Demo stops the collector, so our entries would point at a closed port: take them out until live is back.
   if (on) removeHooksForQuit()
-  collector?.stop()
+  void collector?.stop()
   collector = null
   latest = null
   port = null

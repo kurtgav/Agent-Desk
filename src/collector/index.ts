@@ -61,6 +61,8 @@ parent.on('message', (e: { data: ToCollector }) => {
   } else if (m.type === 'decide') {
     const result = collector?.decide(m.itemId, m.verdict) ?? { ok: false as const, error: 'AgentDeck is still starting its collector.' }
     post({ type: 'decided', reqId: m.reqId, result })
+  } else if (m.type === 'close') {
+    void (collector?.close() ?? Promise.resolve()).catch(report).finally(() => process.exit(0))
   } else if (m.type === 'detail') {
     let detail = null
     try {

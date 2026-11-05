@@ -26,6 +26,8 @@ export type ToCollector =
   /** A request: the reply carries the same `reqId`. Requests are never replayed to a restarted collector. */
   | { type: 'detail'; reqId: number; sessionId: string }
   | { type: 'decide'; reqId: number; itemId: string; verdict: Verdict }
+  /** Quit: answer what waits with an empty reply, write its audit rows, then exit (ADR-0006). */
+  | { type: 'close' }
 
 export type FromCollector =
   | { type: 'ready'; port: number }
