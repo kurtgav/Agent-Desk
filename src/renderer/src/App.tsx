@@ -83,8 +83,10 @@ export function App() {
 
   useEffect(() => connect(), [])
   useShortcuts()
-  // A new page starts at its top.
-  useEffect(() => main.current?.scrollTo({ top: 0 }), [nav])
+  // A new page starts at its top. A block body: scrollTo returns a Promise in current Chromium, and a returned value is taken as the cleanup.
+  useEffect(() => {
+    main.current?.scrollTo({ top: 0 })
+  }, [nav])
 
   return (
     <Tooltip.Provider delayDuration={300}>
