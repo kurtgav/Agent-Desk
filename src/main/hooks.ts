@@ -1,6 +1,6 @@
 // ADR-0005 integration operations: state, dry run, install, uninstall. No electron import: unit-testable.
 import type { AppStatus, HooksPreview, HooksResult } from '@shared/bridge'
-import { planInstall, planUninstall, shapeKey, type HookTarget, type Plan } from './hooks-install'
+import { inspect, planDiff, planInstall, planUninstall, shapeKey, type HookTarget, type Plan } from './hooks-install'
 import { readText, writeSettings } from './settings-writer'
 
 export interface HookPaths {
@@ -15,33 +15,39 @@ export const SHAPE = shapeKey({})
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-function read(path: string): { ok: true; text: string | null } | { ok: false; error: string } {
+/** The file's text, or why it can't be used. Never throws: a broken file must not take the status refresh down. */
+function read<T>(path: string, use: (text: string | null) => T): T | { ok: false; error: string } {
+  let text: string | null
   try {
-    return { ok: true, text: readText(path) }
+    text = readText(path)
   } catch (e) {
     return { ok: false, error: `Could not read ${path}: ${message(e)}` }
+  }
+  try {
+    return use(text)
+  } catch {
+    // A shape the planner doesn't expect (duplicate keys, for one). Nothing was written.
+    return { ok: false, error: 'AgentDeck could not make sense of settings.json, so it left the file alone.' }
   }
 }
 
 /**
- * `installed` when settings.json already holds exactly our entries for `target`. Before the collector has a port
+ * `installed` when settings.json holds exactly our entries for `target`. Before the collector has a port
  * (`target` null) it can only say whether any of our entries are there.
  */
 export function hooksState(paths: HookPaths, target: HookTarget | null): Pick<AppStatus, 'hooks' | 'hooksError' | 'conflicts'> {
-  const file = read(paths.settings)
-  if (!file.ok) return { hooks: 'error', hooksError: file.error, conflicts: [] }
-  const plan = target ? planInstall(file.text, target) : planUninstall(file.text)
-  if (!plan.ok) return { hooks: 'error', hooksError: plan.error, conflicts: [] }
-  const installed = target ? !plan.changed : plan.changed
-  return { hooks: installed ? 'installed' : 'missing', hooksError: null, conflicts: plan.conflicts }
+  const r = read(paths.settings, (text) => inspect(text, target))
+  if (!r.ok) return { hooks: 'error', hooksError: r.error, conflicts: [] }
+  return { hooks: r.installed ? 'installed' : 'missing', hooksError: null, conflicts: r.conflicts }
 }
 
 function preview(paths: HookPaths, make: (text: string | null) => Plan): HooksPreview {
-  const file = read(paths.settings)
-  if (!file.ok) return { ok: false, path: paths.settings, error: file.error }
-  const plan = make(file.text)
-  if (!plan.ok) return { ok: false, path: paths.settings, error: plan.error }
-  return { ok: true, path: paths.settings, backups: paths.backups, changed: plan.changed, diff: plan.diff, conflicts: plan.conflicts }
+  const r = read(paths.settings, (text) => {
+    const plan = make(text)
+    return plan.ok ? { ...plan, diff: planDiff(plan) } : plan
+  })
+  if (!r.ok) return { ok: false, path: paths.settings, error: r.error }
+  return { ok: true, path: paths.settings, backups: paths.backups, changed: r.changed, diff: r.diff, conflicts: r.conflicts }
 }
 
 export const previewInstall = (paths: HookPaths, target: HookTarget): HooksPreview => preview(paths, (t) => planInstall(t, target))

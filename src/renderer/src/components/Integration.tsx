@@ -88,7 +88,7 @@ export function IntegrationDialog({ mode, onClose }: { mode: IntegrationMode | n
               </p>
               {preview.changed && (
                 <p className="mt-1 text-[12px] text-muted">
-                  A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. Token values are hidden below.
+                  A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. Below, the values already in your file and AgentDeck's token are hidden; only the keys and AgentDeck's address show.
                 </p>
               )}
               {preview.conflicts.length > 0 && (

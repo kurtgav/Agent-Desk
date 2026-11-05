@@ -75,8 +75,14 @@ function hookPaths(): HookPaths {
 
 const target = (): HookTarget | null => (port === null ? null : { port, token: hookToken() })
 
-/** The user OK'd this entry shape in the install dialog; launch and quit then reuse that consent (ADR-0005 § 4). */
-const consented = (): boolean => readConfig(configFile()).hooksConsent === SHAPE
+/**
+ * The user OK'd this entry shape, for this settings.json, in the install dialog; launch then reuses that consent
+ * (ADR-0005 § 4). Another CLAUDE_CONFIG_DIR is another file, so it gets its own diff and OK.
+ */
+function consented(): boolean {
+  const c = readConfig(configFile())
+  return c.hooksConsent === SHAPE && c.hooksConsentPath === hookPaths().settings
+}
 
 function prefs(): NotifyPrefs {
   return notifyPrefs(readConfig(configFile()))
@@ -99,9 +105,12 @@ function installIfConsented(): void {
   if (!r.ok) console.error(`[hooks] install: ${r.error}`)
 }
 
-/** Quit (ADR-0005 § 1): with AgentDeck closed, Claude Code sees no AgentDeck hooks. The consent stays for next launch. */
+/**
+ * Quit (ADR-0005 § 1): with AgentDeck closed, Claude Code sees no AgentDeck hooks. The consent stays for next launch.
+ * Any recorded consent counts here, not only this version's shape: entries an older version installed must go too.
+ */
 function removeHooksForQuit(): void {
-  if (!consented()) return
+  if (typeof readConfig(configFile()).hooksConsent !== 'string') return
   const r = uninstall(hookPaths())
   if (!r.ok) console.error(`[hooks] uninstall on quit: ${r.error}`)
 }
@@ -112,7 +121,7 @@ function onInstall(): HooksResult {
   const t = target()
   if (demo || !t) return { ok: false, error: demo ? 'Turn demo data off first.' : NOT_READY }
   const r = install(hookPaths(), t)
-  if (r.ok) updateConfig(configFile(), { hooksConsent: SHAPE, hooksConsentAt: Date.now() })
+  if (r.ok) updateConfig(configFile(), { hooksConsent: SHAPE, hooksConsentPath: hookPaths().settings, hooksConsentAt: Date.now() })
   refreshStatus()
   return r
 }
@@ -246,6 +255,8 @@ function watchWindow(w: BrowserWindow): void {
     if (!demo) refreshStatus()
   })
   w.on('blur', () => sendFocus(false))
+  // Log off, restart or shutdown may end the process before will-quit (BrowserWindow § Event: 'session-end').
+  w.on('session-end', removeHooksForQuit)
   sendWindowState(w)
 }
 

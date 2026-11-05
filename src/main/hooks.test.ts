@@ -71,4 +71,34 @@ describe('hook integration (acceptance: uninstall removes exactly our entries)',
     const p = paths('{ "disableAllHooks": true }')
     expect(hooksState(p, T).conflicts).toEqual([expect.stringContaining('disableAllHooks')])
   })
+
+  it('a file the planner cannot handle is an error state, not a crash, and is left alone', () => {
+    const dup = '{ "hooks": {}, "hooks": [] }' // duplicate keys: jsonc sees the first, JSON.parse the last
+    const p = paths(dup)
+    expect(hooksState(p, T)).toMatchObject({ hooks: 'error' })
+    expect(previewInstall(p, T)).toMatchObject({ ok: false })
+    expect(install(p, T)).toMatchObject({ ok: false })
+    expect(readFileSync(p.settings, 'utf8')).toBe(dup)
+  })
+
+  it('refuses a file that is not UTF-8 instead of rewriting its bytes', () => {
+    const p = paths()
+    mkdirSync(join(p.settings, '..'))
+    const latin1 = Buffer.from('{ "name": "caf\xe9" }\n', 'latin1')
+    writeFileSync(p.settings, latin1)
+    expect(hooksState(p, T)).toMatchObject({ hooks: 'error', hooksError: expect.stringContaining('not UTF-8') })
+    expect(install(p, T)).toMatchObject({ ok: false })
+    expect(readFileSync(p.settings).equals(latin1)).toBe(true)
+  })
+
+  it('launch and quit reuse their two backups instead of piling up copies', () => {
+    const p = paths(ORIGINAL)
+    for (let i = 0; i < 3; i++) {
+      expect(install(p, T)).toEqual({ ok: true })
+      expect(uninstall(p)).toEqual({ ok: true })
+    }
+    const names = readdirSync(p.backups)
+    expect(names).toHaveLength(2)
+    expect(names.map((n) => readFileSync(join(p.backups, n), 'utf8'))).toContain(ORIGINAL)
+  })
 })

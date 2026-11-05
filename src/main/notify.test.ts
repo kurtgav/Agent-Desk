@@ -86,6 +86,14 @@ describe('toast text and pause', () => {
     expect(toastText(item({ kind: 'review', priority: 4, title: 'Done' }), undefined)).toEqual({ title: 'Ready for review', body: 'Done' })
   })
 
+  it('toasts are one short plain line: no newlines, control or bidi characters, capped at 120', () => {
+    const { body } = toastText(item({ title: 'Run `echo ok\n\n\trm -rf ~ ‮gnp.exe\u0007`' }), undefined)
+    expect(body).toBe('Run echo ok rm -rf ~ gnp.exe')
+    const long = toastText(item({ title: 'x'.repeat(500) }), undefined).body
+    expect(long).toHaveLength(120)
+    expect(long.endsWith('…')).toBe(true)
+  })
+
   it('"until tomorrow" is 08:00 on the next day', () => {
     const t = new Date(tomorrowMorning(new Date(2026, 10, 5, 23, 30).getTime()))
     expect([t.getDate(), t.getHours(), t.getMinutes()]).toEqual([6, 8, 0])

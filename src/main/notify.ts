@@ -83,10 +83,21 @@ const HEADINGS: Record<AttentionKind, string> = {
 }
 
 /** Toast text: what happened and where, then the exact command or question without Markdown backticks. */
+const TOAST_MAX = 120
+
+/**
+ * One short plain line. Windows keeps toast text in its notification database, and control or bidi characters
+ * from a command could reorder or hide part of it (M3 security review).
+ */
+function plain(s: string): string {
+  const t = s.replace(/[\p{Cc}\p{Cf}`]/gu, ' ').replace(/\s+/g, ' ').trim()
+  return t.length > TOAST_MAX ? `${t.slice(0, TOAST_MAX - 1)}…` : t
+}
+
 export function toastText(item: AttentionItem, session: Session | undefined): { title: string; body: string } {
   return {
-    title: session ? `${HEADINGS[item.kind]} · ${session.name}` : HEADINGS[item.kind],
-    body: item.title.replace(/`/g, '')
+    title: plain(session ? `${HEADINGS[item.kind]} · ${session.name}` : HEADINGS[item.kind]),
+    body: plain(item.title)
   }
 }
 

@@ -3,8 +3,7 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { findNodeAtLocation, parseTree, type JSONPath, type Node } from 'jsonc-parser'
-import { maskSecrets } from '../collector/redact'
+import { findNodeAtLocation, parseTree, type JSONPath, type Node, type ParseError } from 'jsonc-parser'
 
 /** SessionStart is excluded: HTTP hooks don't run there (D-004). */
 export const HOOK_EVENTS: readonly string[] = [
@@ -35,7 +34,7 @@ export interface HookTarget {
 
 export type Plan =
   // `after` is '' when there is no file and nothing to change (then `changed` is false).
-  | { ok: true; before: string | null; after: string; changed: boolean; diff: string; conflicts: string[] }
+  | { ok: true; before: string | null; after: string; changed: boolean; conflicts: string[] }
   | { ok: false; error: string }
 
 const TOKEN_HEADER = 'X-AgentDeck-Token'
@@ -78,13 +77,27 @@ export function shapeKey(target: Omit<HookTarget, 'port' | 'token'>): string {
 
 type Parsed = { ok: true; root: Json } | { ok: false; error: string }
 
+/** " (line L, column C)" of the first syntax error, or "" if jsonc-parser finds none (it is laxer than JSON.parse). */
+function where(body: string): string {
+  const errors: ParseError[] = []
+  parseTree(body, errors, { disallowComments: true })
+  const at = errors[0]?.offset
+  if (at === undefined) return ''
+  const before = body.slice(0, at)
+  return ` (line ${before.split('\n').length}, column ${at - before.lastIndexOf('\n')})`
+}
+
+/** Text to edit: none, or only whitespace (an editor's empty save), counts as `{}`. */
+const bodyOf = (text: string | null): string => (text === null || !text.replace(BOM, '').trim() ? '{}\n' : text.replace(BOM, ''))
+
 function parse(text: string | null): Parsed {
-  if (text === null) return { ok: true, root: {} }
+  const body = bodyOf(text) // Windows PowerShell 5.1 `Out-File` writes a BOM
   let root: unknown
   try {
-    root = JSON.parse(text.replace(BOM, '')) // Windows PowerShell 5.1 `Out-File` writes one
-  } catch (e) {
-    return { ok: false, error: `settings.json is not valid JSON (${(e as Error).message})` }
+    root = JSON.parse(body)
+  } catch {
+    // Not the engine's message: it quotes the file around the error, and the file can hold API keys.
+    return { ok: false, error: `settings.json is not valid JSON${where(body)}` }
   }
   if (!isObj(root)) return { ok: false, error: 'settings.json is not a JSON object' }
   if (root.hooks === undefined) return { ok: true, root }
@@ -199,11 +212,15 @@ function addText(text: string, t: HookTarget): string {
 
 function plan(text: string | null, root: Json, edit: (body: string) => string, conflicts: string[]): Plan {
   const bom = text !== null && BOM.test(text) ? '\uFEFF' : ''
-  const body = text === null ? '{}\n' : text.replace(BOM, '')
-  const edited = bom + edit(body)
+  const edited = bom + edit(bodyOf(text))
   // Nothing to add or remove: keep the user's bytes, whatever their formatting.
-  if (isDeepStrictEqual(JSON.parse(edited.replace(BOM, '')), root)) return { ok: true, before: text, after: text ?? '', changed: false, diff: '', conflicts }
-  return { ok: true, before: text, after: edited, changed: true, diff: unifiedDiff(text ?? '', edited), conflicts }
+  if (isDeepStrictEqual(JSON.parse(edited.replace(BOM, '')), root)) return { ok: true, before: text, after: text ?? '', changed: false, conflicts }
+  return { ok: true, before: text, after: edited, changed: true, conflicts }
+}
+
+/** The masked unified diff a preview shows. Only previews build it: status checks run on every window focus. */
+export function planDiff(p: Extract<Plan, { ok: true }>): string {
+  return p.changed ? unifiedDiff(p.before ?? '', p.after) : ''
 }
 
 /** `text` is the current file content, or null when the file does not exist. */
@@ -219,6 +236,30 @@ export function planUninstall(text: string | null): Plan {
   return plan(text, parsed.root, (body) => stripText(body, PRUNE_OURS), [])
 }
 
+export type Inspection = { ok: true; installed: boolean; conflicts: string[] } | { ok: false; error: string }
+
+/**
+ * With a target: every event has exactly one of our entries, equal to the one we'd write, and no other event has any.
+ * Order doesn't matter, so a group that `/hooks` added after ours still reads as installed (M3 code review).
+ * Without one (no port yet): whether any of ours is there.
+ */
+export function inspect(text: string | null, target: HookTarget | null): Inspection {
+  const parsed = parse(text)
+  if (!parsed.ok) return parsed
+  const hooks = isObj(parsed.root.hooks) ? parsed.root.hooks : {}
+  const ours = (event: string): unknown[] => {
+    const groups = hooks[event]
+    return (Array.isArray(groups) ? groups : []).flatMap((g: unknown) => (isObj(g) && Array.isArray(g.hooks) ? g.hooks : [])).filter(isOurs)
+  }
+  if (!target) return { ok: true, installed: Object.keys(hooks).some((e) => ours(e).length > 0), conflicts: [] }
+  const exact = (e: string): boolean => {
+    const found = ours(e)
+    return found.length === 1 && isDeepStrictEqual(found[0], (ourGroup(e, target).hooks as unknown[])[0])
+  }
+  const installed = HOOK_EVENTS.every(exact) && Object.keys(hooks).every((e) => HOOK_EVENTS.includes(e) || ours(e).length === 0)
+  return { ok: true, installed, conflicts: conflicts(parsed.root, target.port) }
+}
+
 /** True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal objects. */
 export function foreignUnchanged(before: string | null, after: string): boolean {
   const a = parse(before)
@@ -226,9 +267,21 @@ export function foreignUnchanged(before: string | null, after: string): boolean 
   return a.ok && b.ok && isDeepStrictEqual(strip(a.root, PRUNE_ALL), strip(b.root, PRUNE_ALL))
 }
 
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const globMatches = (pattern: string, s: string): boolean =>
-  new RegExp(`^${pattern.split(/\*+/).map(escapeRe).join('.*')}$`).test(s)
+/** `*` matches any run of characters. Linear: the pattern comes from the user's file, so no regex to backtrack. */
+export function globMatches(pattern: string, s: string): boolean {
+  const parts = pattern.split('*')
+  const first = parts[0] ?? ''
+  const last = parts.at(-1) ?? ''
+  if (parts.length === 1) return pattern === s
+  if (!s.startsWith(first) || s.length < first.length + last.length) return false
+  let at = first.length
+  for (const part of parts.slice(1, -1)) {
+    const i = s.indexOf(part, at)
+    if (i < 0) return false
+    at = i + part.length
+  }
+  return s.length - last.length >= at && s.endsWith(last)
+}
 
 function conflicts(root: Json, port: number): string[] {
   const url = ourUrl(port)
@@ -243,8 +296,11 @@ function conflicts(root: Json, port: number): string[] {
 type Op = [' ' | '-' | '+', string]
 const lines = (t: string): string[] => (t === '' ? [] : t.replace(/\r?\n$/, '').split(/\r?\n/))
 
-// shortcut: O(n·m) LCS table, fine for settings.json sizes; switch to Myers if files reach thousands of lines
+const LCS_MAX_CELLS = 4_000_000 // ≈ 16 MB; about 2,000 lines each side
+
+// shortcut: O(n·m) LCS table, fine for settings.json sizes; past LCS_MAX_CELLS the diff is the whole file out and in
 function lineOps(a: string[], b: string[]): Op[] {
+  if ((a.length + 1) * (b.length + 1) > LCS_MAX_CELLS) return [...a.map((l): Op => ['-', l]), ...b.map((l): Op => ['+', l])]
   const w = b.length + 1
   const lcs = new Uint32Array((a.length + 1) * w)
   const at = (i: number, j: number): number => lcs[i * w + j] ?? 0
@@ -269,8 +325,13 @@ function lineOps(a: string[], b: string[]): Op[] {
   return ops
 }
 
-const TOKEN_VALUE = new RegExp(String.raw`("${TOKEN_HEADER}"\s*:\s*)"(?:[^"\\]|\\.)*"`, 'g')
-const mask = (line: string): string => maskSecrets(line.replace(TOKEN_VALUE, '$1"•••"'))
+const JSON_STRING = /"(?:[^"\\]|\\.)*"(\s*:)?/g
+const SHOWN = /^"(?:http|http:\/\/127\.0\.0\.1:\d+\/hooks)"$/
+/**
+ * Structure only: keys stay, every string value is hidden except our entry's type and URL. Pattern masking missed
+ * secrets in shapes it didn't know (M3 security review), and the token can sit on a line of its own.
+ */
+const mask = (line: string): string => line.replace(JSON_STRING, (s, key?: string) => (key || SHOWN.test(s) ? s : '"•••"'))
 /** Lines of the old (skip '+') or new (skip '-') file covered by `ops`. */
 const span = (ops: Op[], skip: '+' | '-'): number => ops.filter(([o]) => o !== skip).length
 const range = (start: number, count: number): string => `${count > 0 ? start + 1 : start},${count}`

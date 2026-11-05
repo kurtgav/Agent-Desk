@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   foreignUnchanged,
   HOOK_EVENTS,
+  inspect,
   isOurs,
+  globMatches,
+  planDiff,
   planInstall,
   planUninstall,
   settingsPath,
@@ -92,7 +95,7 @@ describe('planInstall', () => {
   it('is idempotent', () => {
     const first = install(JSON.stringify(SETTINGS, null, 2))
     const second = install(first.after)
-    expect(second).toMatchObject({ changed: false, after: first.after, diff: '' })
+    expect(second).toMatchObject({ changed: false, after: first.after })
   })
 
   it('replaces our entries when port or token change', () => {
@@ -115,7 +118,7 @@ describe('planInstall', () => {
   })
 
   it('aborts on unparseable or malformed settings', () => {
-    for (const bad of ['{not json', '', '[1,2]', '{"hooks":[]}', '{"hooks":null}', '{"hooks":{"Stop":{}}}']) {
+    for (const bad of ['{not json', '[1,2]', '{"hooks":[]}', '{"hooks":null}', '{"hooks":{"Stop":{}}}']) {
       expect(planInstall(bad, T).ok).toBe(false)
       expect(planUninstall(bad).ok).toBe(false)
     }
@@ -136,7 +139,7 @@ describe('planInstall', () => {
 describe('diff', () => {
   it('masks our token and other secrets', () => {
     const text = JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk-ant-api03-abcdef' } }, null, 2) + '\n'
-    const { diff } = install(text)
+    const diff = planDiff(install(text))
     expect(diff).toMatch(/^--- settings\.json\n\+\+\+ settings\.json \(after\)\n@@ -\d+,\d+ \+\d+,\d+ @@/)
     expect(diff).toContain('"ANTHROPIC_API_KEY": "•••"')
     expect(diff).toContain('"X-AgentDeck-Token": "•••"')
@@ -147,15 +150,108 @@ describe('diff', () => {
   it('counts lines in hunk headers', () => {
     const p = install(null)
     const lines = p.after.trimEnd().split('\n')
-    expect(p.diff.split('\n')[2]).toBe(`@@ -0,0 +1,${lines.length} @@`)
-    expect(uninstall(p.after).diff.split('\n').slice(2, 4)).toEqual([`@@ -1,${lines.length} +1,1 @@`, '-{'])
+    expect(planDiff(p).split('\n')[2]).toBe(`@@ -0,0 +1,${lines.length} @@`)
+    expect(planDiff(uninstall(p.after)).split('\n').slice(2, 4)).toEqual([`@@ -1,${lines.length} +1,1 @@`, '-{'])
   })
 
   it('shows only the changed lines with 2 lines of context on a port change', () => {
-    const { diff } = install(install('{}').after, { port: 1, token: 'other' })
+    const diff = planDiff(install(install('{}').after, { port: 1, token: 'other' }))
     const changes = diff.split('\n').filter((l) => /^[-+] /.test(l))
     expect(changes).toHaveLength(64) // 16 events × (url + token) × (old + new)
     expect(diff).not.toContain('other')
+  })
+
+  it('shows structure only: keys and our address stay, every other value is hidden, wherever it sits', () => {
+    const user = [
+      '{',
+      '  "env": { "DB_PASS": "hunter two", "Authorization": "Basic dXNlcjpwYXNz" },',
+      '  "hooks": {',
+      '    "Stop": [',
+      '      { "hooks": [{ "type": "command", "command": "curl https://hooks.slack.com/services/T0/B0/xyz" }] }',
+      '    ]',
+      '  }',
+      '}',
+      ''
+    ].join('\n')
+    const diff = planDiff(install(user))
+    expect(diff).toContain('"url": "http://127.0.0.1:47821/hooks"')
+    expect(diff).toContain('"type": "http"')
+    for (const secret of ['hunter', 'dXNlcjpwYXNz', 'slack', 'tok-secret']) expect(diff).not.toContain(secret)
+    // A hand-wrapped token on a line of its own, and a minified one-line file.
+    const wrapped = install(null).after.replace(/("X-AgentDeck-Token":) /g, '$1\n          ')
+    expect(planDiff(uninstall(wrapped))).not.toContain('tok-secret')
+    expect(planDiff(install('{"env":{"K":"v-secret"}}'))).not.toContain('v-secret')
+  })
+})
+
+describe('known limit (D-084)', () => {
+  it('an empty container the user already had does not come back after uninstall', () => {
+    // Uninstall is stateless: it can't tell `"Stop": []` it emptied from one that was empty before install.
+    const text = '{\n  "hooks": {\n    "Stop": []\n  }\n}\n'
+    expect(uninstall(install(text).after).after).toBe('{}\n')
+    expect(foreignUnchanged(text, '{}\n')).toBe(true) // nothing with content was lost
+  })
+})
+
+describe('reading the file', () => {
+  it('an empty or blank file counts as {}', () => {
+    for (const blank of ['', '  \n', '﻿']) {
+      expect(json(install(blank).after.replace(/^﻿/, '')).hooks.Stop).toHaveLength(1)
+      expect(uninstall(blank)).toMatchObject({ changed: false, after: blank })
+    }
+  })
+
+  it('a syntax error is reported by line and column, never by quoting the file', () => {
+    const p = planInstall('{\n  "env": { "API_KEY": sk-ant-api03-abc }\n}', T)
+    expect(p).toEqual({ ok: false, error: 'settings.json is not valid JSON (line 2, column 23)' })
+  })
+})
+
+describe('inspect (is it installed?)', () => {
+  it('is order-insensitive: a group added after ours still reads as installed', () => {
+    const after = json(install(JSON.stringify(SETTINGS)).after)
+    after.hooks.Stop!.push({ hooks: [{ type: 'command', command: 'added later by /hooks' }] })
+    after.hooks.PreToolUse!.reverse()
+    expect(inspect(JSON.stringify(after), T)).toMatchObject({ ok: true, installed: true })
+  })
+
+  it('is not installed when an event lacks ours, has two, points elsewhere, or ours sits under an event we do not use', () => {
+    const base = (): ReturnType<typeof json> => json(install(null).after)
+    const missing = base()
+    missing.hooks.Stop = []
+    const twice = base()
+    twice.hooks.Stop!.push({ hooks: [OURS] })
+    const extra = base()
+    extra.hooks.SessionStart = [{ hooks: [OURS] }]
+    for (const s of [missing, twice, extra]) expect(inspect(JSON.stringify(s), T)).toMatchObject({ installed: false })
+    expect(inspect(install(null).after, { ...T, port: 1 })).toMatchObject({ installed: false })
+    expect(inspect(install(null).after, { ...T, token: 'rotated' })).toMatchObject({ installed: false })
+  })
+
+  it('without a port it says whether any of ours is there', () => {
+    expect(inspect(JSON.stringify(SETTINGS), null)).toMatchObject({ installed: false })
+    expect(inspect(install(null).after, null)).toMatchObject({ installed: true })
+  })
+})
+
+describe('globMatches (allowedHttpHookUrls)', () => {
+  it.each([
+    ['http://127.0.0.1:*', true],
+    ['http://127.0.0.1:*/hooks', true],
+    ['*', true],
+    ['http://127.0.0.1:47821/hooks', true],
+    ['https://*', false],
+    ['http://localhost:*', false],
+    ['*:47821/hooks*', true],
+    ['http://127.0.0.1:*/other', false]
+  ])('%s → %s', (pattern, expected) => {
+    expect(globMatches(pattern, 'http://127.0.0.1:47821/hooks')).toBe(expected)
+  })
+
+  it('stays linear on patterns that make a regex backtrack', () => {
+    const start = performance.now()
+    expect(globMatches(`${'*a'.repeat(40)}b`, 'a'.repeat(5_000))).toBe(false)
+    expect(performance.now() - start).toBeLessThan(200)
   })
 })
 
@@ -214,8 +310,8 @@ describe('planUninstall', () => {
 
   it('is a no-op without our entries or without a file', () => {
     const minified = JSON.stringify(SETTINGS)
-    expect(uninstall(minified)).toMatchObject({ changed: false, after: minified, diff: '' })
-    expect(uninstall(null)).toMatchObject({ changed: false, diff: '' })
+    expect(uninstall(minified)).toMatchObject({ changed: false, after: minified })
+    expect(uninstall(null)).toMatchObject({ changed: false })
   })
 })
 
@@ -324,7 +420,7 @@ describe('writeSettings', () => {
   })
 
   it('deletes the file again when validation fails and there was none', () => {
-    const bad = (): Plan => ({ ok: true, before: null, after: '{"x":1}', changed: true, diff: '', conflicts: [] })
+    const bad = (): Plan => ({ ok: true, before: null, after: '{"x":1}', changed: true, conflicts: [] })
     expect(writeSettings(file, bad, backups).ok).toBe(false)
     expect(existsSync(file)).toBe(false)
   })
