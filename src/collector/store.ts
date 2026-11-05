@@ -1,0 +1,304 @@
+import { DatabaseSync } from 'node:sqlite'
+import { pathKey } from '@shared/paths'
+import type { ChangedFile, Snapshot } from '@shared/snapshot'
+import type { AgentEvent } from './events'
+import { closeStale, correlate, duePoll, reduceSession, toSession, type SessionState } from './reduce'
+
+/** ADR-0003. Each entry runs once, in order, inside one transaction; `user_version` records progress. */
+const MIGRATIONS = [
+  `CREATE TABLE events (
+     seq INTEGER PRIMARY KEY,
+     id TEXT NOT NULL UNIQUE,
+     ts INTEGER NOT NULL,
+     source TEXT NOT NULL,
+     session_id TEXT NOT NULL,
+     agent_id TEXT,
+     agent_type TEXT,
+     kind TEXT NOT NULL,
+     tool_name TEXT,
+     tool_use_id TEXT,
+     summary TEXT NOT NULL,
+     cwd TEXT,
+     dedupe_key TEXT UNIQUE,
+     payload TEXT NOT NULL
+   );
+   CREATE INDEX events_session_ts ON events(session_id, ts);
+   CREATE INDEX events_ts ON events(ts);
+   CREATE TABLE sessions (id TEXT PRIMARY KEY, last_event_at INTEGER NOT NULL, state TEXT NOT NULL);
+   CREATE TABLE work_spans (session_id TEXT NOT NULL, start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL);
+   CREATE INDEX work_spans_end ON work_spans(end_ts);
+   CREATE TABLE finished_turns (session_id TEXT NOT NULL, ts INTEGER NOT NULL);
+   CREATE INDEX finished_turns_ts ON finished_turns(ts);
+   CREATE TABLE files (path_key TEXT NOT NULL, path TEXT NOT NULL, session_id TEXT NOT NULL, tool TEXT NOT NULL, changed_at INTEGER NOT NULL);
+   CREATE INDEX files_changed_at ON files(changed_at);`
+]
+
+const DAY_MS = 86_400_000
+export const RETENTION_MS = 30 * DAY_MS
+/**
+ * D-056: a byte-identical body within this window is a repeated delivery. Later ones are real: a PermissionRequest
+ * has no per-request field, so asking twice for the same command sends the same bytes.
+ */
+export const DEDUPE_MS = 2_000
+/** Sessions the snapshot shows: every live one, plus ended ones seen this week, newest first. */
+const MAX_SESSIONS = 50
+const MAX_FILES = 200
+const MAX_AGENT_TYPES = 5
+
+/** D-008: a week starts Monday 00:00 local time. */
+export function weekStart(now: number): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return d.getTime()
+}
+
+function lastWeekStart(now: number): number {
+  const d = new Date(weekStart(now))
+  d.setDate(d.getDate() - 7)
+  return d.getTime()
+}
+
+/** Length of [a, b] that falls inside [from, to]. */
+const overlap = (a: number, b: number, from: number, to: number): number => Math.max(0, Math.min(b, to) - Math.max(a, from))
+
+interface Span {
+  sessionId: string
+  start: number
+  end: number
+}
+
+export interface SnapshotExtras {
+  awaySince: number | null
+  awayUntil: number | null
+  agentDefinitionCount: number
+}
+
+export class Store {
+  private readonly db: DatabaseSync
+  private readonly sessions = new Map<string, SessionState>()
+  private spans: Span[] = []
+  private finished: number[] = []
+  private files: ChangedFile[] = []
+  private readonly agentTypes = new Map<string, number>()
+  /** dedupeKey → arrival, oldest first (D-056). */
+  private readonly recent = new Map<string, number>()
+
+  constructor(file: string, now = Date.now()) {
+    this.db = new DatabaseSync(file)
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
+    this.migrate()
+    this.load(now)
+  }
+
+  close(): void {
+    this.db.close()
+  }
+
+  private migrate(): void {
+    const { user_version: version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
+    MIGRATIONS.slice(version).forEach((sql, i) =>
+      this.tx(() => {
+        this.db.exec(sql)
+        this.db.exec(`PRAGMA user_version = ${version + i + 1}`)
+      })
+    )
+  }
+
+  private tx<T>(fn: () => T): T {
+    this.db.exec('BEGIN')
+    try {
+      const result = fn()
+      this.db.exec('COMMIT')
+      return result
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  private load(now: number): void {
+    const since = lastWeekStart(now)
+    for (const row of this.db.prepare('SELECT state FROM sessions WHERE last_event_at >= ?').all(now - RETENTION_MS)) {
+      const s = JSON.parse(String(row.state)) as SessionState
+      this.sessions.set(s.id, s)
+    }
+    this.closeStaleSessions()
+    this.spans = this.db
+      .prepare('SELECT session_id, start_ts, end_ts FROM work_spans WHERE end_ts >= ?')
+      .all(since)
+      .map((r) => ({ sessionId: String(r.session_id), start: Number(r.start_ts), end: Number(r.end_ts) }))
+    this.finished = this.db
+      .prepare('SELECT ts FROM finished_turns WHERE ts >= ?')
+      .all(since)
+      .map((r) => Number(r.ts))
+    this.files = this.db
+      .prepare('SELECT path, session_id, tool, changed_at FROM files WHERE changed_at >= ? ORDER BY changed_at')
+      .all(since)
+      .map((r) => ({ path: String(r.path), sessionId: String(r.session_id), tool: String(r.tool), changedAt: Number(r.changed_at) }))
+    for (const r of this.db
+      // Subagents only (UI_MAP § Agents): main-thread events also carry agent_type when settings name an `agent`.
+      .prepare("SELECT agent_type, MAX(ts) AS at FROM events WHERE kind = 'subagent.started' AND agent_type IS NOT NULL AND ts >= ? GROUP BY agent_type")
+      .all(now - 7 * DAY_MS)) {
+      this.agentTypes.set(String(r.agent_type), Number(r.at))
+    }
+  }
+
+  /** D-057: sessions that were working when AgentDeck stopped end their stretch at their last event. */
+  private closeStaleSessions(): void {
+    const closed = [...this.sessions.values()].flatMap((s) => {
+      const c = closeStale(s)
+      return c.session === s ? [] : [c]
+    })
+    if (!closed.length) return
+    const upsert = this.db.prepare('UPDATE sessions SET state = ? WHERE id = ?')
+    const insertSpan = this.db.prepare('INSERT INTO work_spans (session_id, start_ts, end_ts) VALUES (?, ?, ?)')
+    this.tx(() => {
+      for (const { session, span } of closed) {
+        upsert.run(JSON.stringify(session), session.id)
+        if (span) insertSpan.run(session.id, span[0], span[1])
+      }
+    })
+    for (const { session } of closed) this.sessions.set(session.id, session)
+  }
+
+  /** Sessions not known to have ended; the Poller ends the ones its first poll doesn't list (D-057). */
+  liveIds(): string[] {
+    return [...this.sessions.values()].filter((s) => !s.ended).map((s) => s.id)
+  }
+
+  /** Poll rows held back by the hook window whose window has now passed (D-058). */
+  duePolls(now: number): AgentEvent[] {
+    return [...this.sessions.values()].flatMap((s) => duePoll(s, now) ?? [])
+  }
+
+  /** D-056. Forgets keys older than the window, then reports whether this one was seen inside it. */
+  private repeated(ev: AgentEvent): boolean {
+    for (const [k, at] of this.recent) {
+      if (ev.ts - at < DEDUPE_MS) break
+      this.recent.delete(k)
+    }
+    if (!ev.dedupeKey) return false
+    const at = this.recent.get(ev.dedupeKey)
+    if (at !== undefined && ev.ts - at < DEDUPE_MS) return true
+    this.recent.set(ev.dedupeKey, ev.ts)
+    return false
+  }
+
+  /**
+   * One transaction per batch: events plus every derived row they produce (ADR-0003). Returns whether anything changed.
+   * Memory is updated only after COMMIT, so a failed batch leaves it in step with the database.
+   */
+  ingest(events: readonly AgentEvent[]): boolean {
+    if (!events.length) return false
+    const insertEvent = this.db.prepare(
+      `INSERT OR IGNORE INTO events (id, ts, source, session_id, agent_id, agent_type, kind, tool_name, tool_use_id, summary, cwd, dedupe_key, payload)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const upsertSession = this.db.prepare(
+      'INSERT INTO sessions (id, last_event_at, state) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET last_event_at = excluded.last_event_at, state = excluded.state'
+    )
+    const insertSpan = this.db.prepare('INSERT INTO work_spans (session_id, start_ts, end_ts) VALUES (?, ?, ?)')
+    const insertFinished = this.db.prepare('INSERT INTO finished_turns (session_id, ts) VALUES (?, ?)')
+    const insertFile = this.db.prepare('INSERT INTO files (path_key, path, session_id, tool, changed_at) VALUES (?, ?, ?, ?, ?)')
+
+    const fresh = events.filter((ev) => !this.repeated(ev)) // STATE_MACHINE § 6 test 7
+    if (!fresh.length) return false
+    const sessions = new Map<string, SessionState>()
+    const spans: Span[] = []
+    const finished: number[] = []
+    const files: ChangedFile[] = []
+    const agentTypes: [string, number][] = []
+
+    this.tx(() => {
+      for (const raw of fresh) {
+        const prev = sessions.get(raw.sessionId) ?? this.sessions.get(raw.sessionId)
+        const ev = correlate(prev, raw)
+        // dedupe_key stays NULL: the UNIQUE column would reject a real repeat after the window (D-056).
+        insertEvent.run(
+          ev.id, ev.ts, ev.source, ev.sessionId, ev.agentId, ev.agentType, ev.kind, ev.toolName, ev.toolUseId,
+          ev.summary, ev.cwd, null, JSON.stringify(ev.payload)
+        )
+        const r = reduceSession(prev, ev)
+        sessions.set(ev.sessionId, r.session)
+        if (ev.kind === 'subagent.started' && ev.agentType) agentTypes.push([ev.agentType, ev.ts])
+        if (r.span) {
+          insertSpan.run(ev.sessionId, r.span[0], r.span[1])
+          spans.push({ sessionId: ev.sessionId, start: r.span[0], end: r.span[1] })
+        }
+        if (r.finishedAt !== null) {
+          insertFinished.run(ev.sessionId, r.finishedAt)
+          finished.push(r.finishedAt)
+        }
+        if (r.file) {
+          insertFile.run(pathKey(r.file.path), r.file.path, ev.sessionId, r.file.tool, ev.ts)
+          files.push({ path: r.file.path, sessionId: ev.sessionId, tool: r.file.tool, changedAt: ev.ts })
+        }
+      }
+      for (const [id, s] of sessions) upsertSession.run(id, s.lastEventAt, JSON.stringify(s))
+    })
+
+    for (const [id, s] of sessions) this.sessions.set(id, s)
+    for (const [t, at] of agentTypes) this.agentTypes.set(t, at)
+    this.spans.push(...spans)
+    this.finished.push(...finished)
+    this.files.push(...files)
+    return true
+  }
+
+  snapshot(now: number, extras: SnapshotExtras): Snapshot {
+    const week = weekStart(now)
+    const lastWeek = lastWeekStart(now)
+    const sessions = [...this.sessions.values()]
+      .filter((s) => !s.ended || s.lastEventAt >= week)
+      .sort((a, b) => b.lastEventAt - a.lastEventAt)
+      .slice(0, MAX_SESSIONS)
+
+    const open = [...this.sessions.values()].filter((s) => s.status === 'working' && s.workingSince !== null)
+    const agentTime = (from: number, to: number): number =>
+      this.spans.reduce((t, x) => t + overlap(x.start, x.end, from, to), 0) +
+      open.reduce((t, s) => t + overlap(s.workingSince!, now, from, to), 0)
+
+    const latest = new Map<string, ChangedFile>()
+    for (const f of this.files) if (f.changedAt >= week) latest.set(pathKey(f.path), f)
+
+    return {
+      mode: 'live',
+      generatedAt: now,
+      awaySince: extras.awaySince,
+      awayUntil: extras.awayUntil,
+      sessions: sessions.map(toSession),
+      attention: [], // M3: the attention engine (ADR-0013)
+      files: [...latest.values()].sort((a, b) => b.changedAt - a.changedAt).slice(0, MAX_FILES),
+      week: {
+        agentTimeMs: Math.round(agentTime(week, now)),
+        agentTimeLastWeekMs: Math.round(agentTime(lastWeek, week)),
+        finishedTurns: this.finished.filter((t) => t >= week)
+      },
+      usage: null, // OTel receiver (ADR-0007) is opt-in and lands later
+      recentAgentTypes: [...this.agentTypes.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MAX_AGENT_TYPES)
+        .map(([t]) => t),
+      agentDefinitionCount: extras.agentDefinitionCount
+    }
+  }
+
+  /** ADR-0003 retention: 30 days on disk; memory keeps only what this week and last week need. */
+  prune(now: number): void {
+    const cutoff = now - RETENTION_MS
+    this.tx(() => {
+      this.db.prepare('DELETE FROM events WHERE ts < ?').run(cutoff)
+      this.db.prepare('DELETE FROM sessions WHERE last_event_at < ?').run(cutoff)
+      this.db.prepare('DELETE FROM work_spans WHERE end_ts < ?').run(cutoff)
+      this.db.prepare('DELETE FROM finished_turns WHERE ts < ?').run(cutoff)
+      this.db.prepare('DELETE FROM files WHERE changed_at < ?').run(cutoff)
+    })
+    const since = lastWeekStart(now)
+    this.spans = this.spans.filter((x) => x.end >= since)
+    this.finished = this.finished.filter((t) => t >= since)
+    this.files = this.files.filter((f) => f.changedAt >= since)
+    for (const [id, s] of this.sessions) if (s.lastEventAt < cutoff) this.sessions.delete(id)
+    for (const [t, at] of this.agentTypes) if (at < now - 7 * DAY_MS) this.agentTypes.delete(t)
+  }
+}
