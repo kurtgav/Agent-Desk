@@ -13,7 +13,8 @@ const BACKUP_NAME = /^settings-\d{8}-\d{6}-\d{3}\.json$/
 
 const code = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code
 
-function readText(path: string): string | null {
+/** The file's text, or null when it does not exist; other read errors throw. */
+export function readText(path: string): string | null {
   try {
     return readFileSync(path, 'utf8')
   } catch (e) {

@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import { findNodeAtLocation, parseTree, type JSONPath, type Node } from 'jsonc-parser'
 import { maskSecrets } from '../collector/redact'
 
 /** SessionStart is excluded: HTTP hooks don't run there (D-004). */
@@ -95,11 +96,12 @@ function parse(text: string | null): Parsed {
 /** Decides whether a container (an event array, or `hooks` when event is null) left empty is dropped. */
 type Prune = (event: string | null, emptiedByUs: boolean) => boolean
 const PRUNE_OURS: Prune = (_, byUs) => byUs
-// Install keeps the containers add() refills, so they keep their place and a second install is byte-identical.
+// Install keeps the containers it refills, so they keep their place in the file.
 const PRUNE_REFILLED: Prune = (e, byUs) => byUs && e !== null && !HOOK_EVENTS.includes(e)
 // Comparison: an empty container carries no foreign content.
 const PRUNE_ALL: Prune = () => true
 
+/** Object form, for `foreignUnchanged`: an independent check of what the text edits below did. */
 function strip(root: Json, prune: Prune): Json {
   if (!isObj(root.hooks)) return root
   const events = Object.entries(root.hooks).flatMap(([event, groups]): [string, unknown][] => {
@@ -117,44 +119,104 @@ function strip(root: Json, prune: Prune): Json {
   return { ...root, hooks: Object.fromEntries(events) }
 }
 
+const BOM = /^\uFEFF/
+
+// ── Text edits: every byte outside our entries stays as the user wrote it (acceptance: "nothing else changes") ──
+
+// jsonc-parser only locates nodes; the splices are ours, so a removal is the exact inverse of an insertion. (Its
+// `modify` reformats whole neighbouring lines on insert and drops a `\r` when it removes a CRLF file's last item.)
+
+const splice = (text: string, from: number, to: number, content: string): string => text.slice(0, from) + content + text.slice(to)
+const tree = (text: string): Node => parseTree(text)! // the text is strict JSON throughout
+
+/** Leading whitespace of the line `offset` is on, plus one unit if something precedes `offset` on that line. */
+function indentAt(text: string, offset: number, unit: string): string {
+  const start = text.lastIndexOf('\n', offset - 1) + 1
+  const lead = /^[ \t]*/.exec(text.slice(start))![0]
+  return text.slice(start + lead.length, offset).trim() ? lead + unit : lead
+}
+
+/** Appends `value` (as `"key": value` in an object) after the container's last child, in the file's own style. */
+function append(text: string, path: JSONPath, value: unknown, key?: string): string {
+  const unit = /^([ \t]+)\S/m.exec(text)?.[1] ?? '  '
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const box = findNodeAtLocation(tree(text), path)!
+  const open = box.parent?.type === 'property' ? box.parent.offset : box.offset
+  const kids = box.children ?? []
+  const last = kids.at(-1)
+  const outer = indentAt(text, open, '')
+  const inner = last ? indentAt(text, last.offset, unit) : outer + unit
+  const body = (key === undefined ? '' : `${JSON.stringify(key)}: `) + JSON.stringify(value, null, unit).replaceAll('\n', eol + inner)
+  if (last) return splice(text, last.offset + last.length, last.offset + last.length, `,${eol}${inner}${body}`)
+  return splice(text, box.offset + 1, box.offset + box.length - 1, `${eol}${inner}${body}${eol}${outer}`)
+}
+
+/** Deletes the array item or object property at `path`, with the comma and whitespace that joined it to a sibling. */
+function remove(text: string, path: JSONPath): string {
+  const value = findNodeAtLocation(tree(text), path)!
+  const node = value.parent?.type === 'property' ? value.parent : value
+  const box = node.parent!
+  const kids = box.children!
+  const i = kids.indexOf(node)
+  if (kids.length === 1) return splice(text, box.offset + 1, box.offset + box.length - 1, '')
+  if (i === kids.length - 1) return splice(text, kids[i - 1]!.offset + kids[i - 1]!.length, node.offset + node.length, '')
+  return splice(text, node.offset, kids[i + 1]!.offset, '')
+}
+
+/** `hooks` after some edits. */
+const hooksOf = (text: string): Json => (JSON.parse(text) as { hooks: Json }).hooks
+
+/** Removes our hook entries (and groups and containers our removal emptied, as `prune` decides) by deleting their text. */
+function stripText(text: string, prune: Prune): string {
+  const root = JSON.parse(text) as Json
+  if (!isObj(root.hooks)) return text
+  let out = text
+  const events = Object.entries(root.hooks)
+  for (const [event, groups] of events) {
+    if (!Array.isArray(groups)) continue
+    // Back to front, so the indices still to visit don't move.
+    for (let g = groups.length - 1; g >= 0; g--) {
+      const group: unknown = groups[g]
+      if (!isObj(group) || !Array.isArray(group.hooks) || !group.hooks.some(isOurs)) continue
+      if (group.hooks.every(isOurs)) out = remove(out, ['hooks', event, g])
+      else for (let h = group.hooks.length - 1; h >= 0; h--) if (isOurs(group.hooks[h])) out = remove(out, ['hooks', event, g, 'hooks', h])
+    }
+    const emptied = groups.length > 0 && (hooksOf(out)[event] as unknown[]).length === 0
+    if (emptied && prune(event, true)) out = remove(out, ['hooks', event])
+  }
+  if (events.length > 0 && Object.keys(hooksOf(out)).length === 0 && prune(null, true)) out = remove(out, ['hooks'])
+  return out
+}
+
 /** Appends our group to each event; new event keys go at the end of `hooks`, a new `hooks` at the end of the root. */
-function add(root: Json, t: HookTarget): Json {
-  const hooks = isObj(root.hooks) ? root.hooks : {}
-  const ours = HOOK_EVENTS.map((e) => [e, [...((hooks[e] as unknown[] | undefined) ?? []), ourGroup(e, t)]])
-  return { ...root, hooks: { ...hooks, ...Object.fromEntries(ours) } }
+function addText(text: string, t: HookTarget): string {
+  let out = isObj((JSON.parse(text) as Json).hooks) ? text : append(text, [], {}, 'hooks')
+  for (const e of HOOK_EVENTS) {
+    out = Array.isArray(hooksOf(out)[e]) ? append(out, ['hooks', e], ourGroup(e, t)) : append(out, ['hooks'], [ourGroup(e, t)], e)
+  }
+  return out
 }
 
-const BOM = /^﻿/
-
-/** Keeps the original's byte-order mark, indent, line endings and trailing newline (new files end with one). */
-function serialize(obj: Json, like: string | null): string {
-  const indent = like === null ? '  ' : (/^([ \t]+)\S/m.exec(like)?.[1] ?? '  ')
-  const eol = like?.includes('\r\n') ? '\r\n' : '\n'
-  const tail = like === null || like.endsWith('\n') ? eol : ''
-  const bom = like !== null && BOM.test(like) ? '﻿' : ''
-  return bom + JSON.stringify(obj, null, indent).replaceAll('\n', eol) + tail
-}
-
-function plan(text: string | null, root: Json, next: Json, conflicts: string[]): Plan {
+function plan(text: string | null, root: Json, edit: (body: string) => string, conflicts: string[]): Plan {
+  const bom = text !== null && BOM.test(text) ? '\uFEFF' : ''
+  const body = text === null ? '{}\n' : text.replace(BOM, '')
+  const edited = bom + edit(body)
   // Nothing to add or remove: keep the user's bytes, whatever their formatting.
-  if (isDeepStrictEqual(next, root)) return { ok: true, before: text, after: text ?? '', changed: false, diff: '', conflicts }
-  const after = serialize(next, text)
-  const changed = after !== text
-  return { ok: true, before: text, after, changed, diff: changed ? unifiedDiff(text ?? '', after) : '', conflicts }
+  if (isDeepStrictEqual(JSON.parse(edited.replace(BOM, '')), root)) return { ok: true, before: text, after: text ?? '', changed: false, diff: '', conflicts }
+  return { ok: true, before: text, after: edited, changed: true, diff: unifiedDiff(text ?? '', edited), conflicts }
 }
 
 /** `text` is the current file content, or null when the file does not exist. */
 export function planInstall(text: string | null, target: HookTarget): Plan {
   const parsed = parse(text)
   if (!parsed.ok) return parsed
-  const { root } = parsed
-  return plan(text, root, add(strip(root, PRUNE_REFILLED), target), conflicts(root, target.port))
+  return plan(text, parsed.root, (body) => addText(stripText(body, PRUNE_REFILLED), target), conflicts(parsed.root, target.port))
 }
 
 export function planUninstall(text: string | null): Plan {
   const parsed = parse(text)
   if (!parsed.ok) return parsed
-  return plan(text, parsed.root, strip(parsed.root, PRUNE_OURS), [])
+  return plan(text, parsed.root, (body) => stripText(body, PRUNE_OURS), [])
 }
 
 /** True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal objects. */

@@ -159,11 +159,34 @@ describe('diff', () => {
   })
 })
 
+describe('hand-formatted files (acceptance: nothing else changes)', () => {
+  const HAND = [
+    '{',
+    '    "model": "opus",  "env": { "FOO": "bar" },',
+    '    "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "lint" } ] } ] },',
+    '    "permissions": {"allow": ["Bash(npm test)"]}',
+    '}'
+  ]
+
+  it.each([
+    ['LF', HAND.join('\n') + '\n'],
+    ['CRLF, no trailing newline', HAND.join('\r\n')],
+    ['no hooks yet', '{ "model": "opus" }'],
+    ['empty object', '{}']
+  ])('%s: install keeps every foreign byte, uninstall restores the file exactly', (_, original) => {
+    const after = install(original).after
+    expect(foreignUnchanged(original, after)).toBe(true)
+    expect(json(after).hooks.Stop).toHaveLength(1)
+    expect(uninstall(after).after).toBe(original)
+    expect(install(after).changed).toBe(false)
+  })
+})
+
 describe('byte-order mark', () => {
   it('reads a settings.json saved with a BOM, keeps the BOM, and round-trips to the original bytes', () => {
-    const original = `﻿${JSON.stringify(SETTINGS, null, 2).replaceAll('\n', '\r\n')}\r\n`
+    const original = `\uFEFF${JSON.stringify(SETTINGS, null, 2).replaceAll('\n', '\r\n')}\r\n`
     const after = install(original).after
-    expect(after.startsWith('﻿{')).toBe(true)
+    expect(after.startsWith('\uFEFF{')).toBe(true)
     expect(json(after.slice(1)).hooks.Stop).toHaveLength(1)
     expect(uninstall(after).after).toBe(original)
   })
