@@ -1,6 +1,7 @@
 import { ChevronRight, FileCode, FileText } from 'lucide-react'
 import type { ChangedFile } from '@shared/snapshot'
 import { useUi } from '@/store'
+import { openChangedFile } from '@/lib/act'
 import { ago } from '@/lib/format'
 import { projectName, sessionIndex } from '@/lib/selectors'
 import { Button, Card, CardHeader, Hint, PENDING_LABEL, pending } from './ui'
@@ -47,8 +48,8 @@ export function RecentFiles() {
             const Icon = CODE.test(f.path) ? FileCode : FileText
             return (
               <li key={f.path} className="border-t border-rule">
-                <Hint label={`Open file: ${PENDING_LABEL.M4}`}>
-                  <button type="button" {...pending('M4')} className="flex h-[57px] w-full items-center gap-3 px-4 text-left hover:bg-ground">
+                <Hint label={`Open in VS Code: ${f.path}`}>
+                  <button type="button" onClick={() => void openChangedFile(f.path)} className="flex h-[57px] w-full items-center gap-3 px-4 text-left hover:bg-ground">
                     <span className="grid size-8 flex-none place-items-center rounded-lg bg-well" aria-hidden>
                       <Icon size={15} strokeWidth={1.75} className="text-muted" />
                     </span>

@@ -8,6 +8,8 @@ import { NeedsYou } from './components/NeedsYou'
 import { RunningNow } from './components/RunningNow'
 import { RecentFiles } from './components/RecentFiles'
 import { YourAgents } from './components/YourAgents'
+import { SessionDrawer } from './components/SessionDrawer'
+import { Notice } from './components/Notice'
 
 const TICK_MS = 30_000
 
@@ -65,6 +67,8 @@ export function App() {
           </main>
         </div>
       </div>
+      <SessionDrawer />
+      <Notice />
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>

@@ -44,12 +44,18 @@ function Progress({ session, now }: { session: Session; now: number }) {
 
 function Row({ session, now }: { session: Session; now: number }) {
   const plan = session.plan
+  const open = useUi((s) => s.openDrawer)
   return (
     <li className="border-t border-rule px-4 py-[9px]">
-      <div className="flex items-center gap-3">
+      {/* The name is the button; its ::after covers the row, so the whole row opens the drawer and the bar keeps its role. */}
+      <div className="relative -mx-2 flex items-center gap-3 rounded-tile px-2 has-[button:hover]:bg-ground">
         <Avatar seed={session.name} size={28} className="flex-none" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium leading-5">{session.name}</p>
+          <p className="truncate text-[14px] font-medium leading-5">
+            <button type="button" onClick={() => open(session.id)} className="text-left outline-none after:absolute after:inset-0 after:rounded-tile focus-visible:after:ring-2 focus-visible:after:ring-accent">
+              {session.name}
+            </button>
+          </p>
           <p className="truncate text-[12px] leading-4 text-muted">
             <Inline text={session.activity} />
             {plan && ` · Step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`} · {projectName(session.cwd)}

@@ -4,10 +4,11 @@ import * as Popover from '@radix-ui/react-popover'
 import { CircleX, Eye, Hourglass, MessageCircle, ShieldAlert, Terminal } from 'lucide-react'
 import type { AttentionItem, AttentionKind, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
+import { sessionAction } from '@/lib/act'
 import { ago } from '@/lib/format'
 import { byPriority, projectName, sessionIndex, waitingWithoutItem } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, cn, pending } from './ui'
+import { Button, Card, CardHeader, Inline, cn } from './ui'
 
 const MAX_ROWS = 3 // the reference shows three; the rest sit behind "See all"
 
@@ -92,18 +93,9 @@ function AnswerInTerminal({ session }: { session: Session }) {
   )
 }
 
-function Later({ label, m }: { label: string; m: 'M4' }) {
-  return (
-    <Hint label={`${label}: ${PENDING_LABEL[m]}`}>
-      <Button size="sm" {...pending(m)}>
-        {label}
-      </Button>
-    </Hint>
-  )
-}
-
 function Actions({ item, session }: { item: AttentionItem; session: Session | undefined }) {
   const resolve = useUi((s) => s.resolve)
+  const open = useUi((s) => s.openDrawer)
   if (item.kind === 'approval' || item.kind === 'question') {
     if (item.held) {
       return (
@@ -117,15 +109,32 @@ function Actions({ item, session }: { item: AttentionItem; session: Session | un
     }
     if (!session) return null
     if (session.surface === 'cli' || session.surface === 'vscode') return <AnswerInTerminal session={session} />
-    if (session.surface === 'desktop') return <Later label="Open in Desktop" m="M4" />
-    return <Later label="Attach" m="M4" />
+    if (session.surface === 'desktop')
+      return (
+        <Button size="sm" onClick={() => void sessionAction('open-desktop', session)}>
+          Open in Desktop
+        </Button>
+      )
+    if (session.bgId)
+      return (
+        <Button size="sm" onClick={() => void sessionAction('attach', session)}>
+          Attach
+        </Button>
+      )
+    return (
+      <Button size="sm" onClick={() => open(session.id)}>
+        Open
+      </Button>
+    )
   }
   return (
     <>
       <Button variant="ghost" size="sm" onClick={() => resolve(item.id, 'dismissed')}>
         Dismiss
       </Button>
-      <Later label="Open" m="M4" />
+      <Button size="sm" onClick={() => open(item.sessionId)}>
+        Open
+      </Button>
     </>
   )
 }

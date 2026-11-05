@@ -97,6 +97,28 @@ test('risky held approval asks first, then answers locally in demo', async () =>
   expect(errors).toEqual([])
 })
 
+test('a Running now row opens the session drawer; demo actions run nothing; Esc closes it', async () => {
+  const { page, errors } = await open(1440, 924)
+  const running = page.getByRole('region', { name: 'Running now' })
+  const first = running.getByRole('listitem').first().getByRole('button').first()
+  const name = (await first.innerText()).trim()
+  await first.click()
+
+  const drawer = page.getByRole('dialog', { name })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole('tab', { name: 'Timeline' })).toHaveAttribute('aria-selected', 'true')
+  await expect(drawer.getByRole('tabpanel')).toContainText('You sent a prompt')
+  await drawer.getByRole('tab', { name: 'Plan' }).click()
+  await expect(drawer.getByRole('tabpanel')).toBeVisible()
+
+  await drawer.getByRole('button', { name: 'Copy resume command' }).click()
+  await expect(page.getByTestId('notice')).toHaveText('Demo data: nothing was run.')
+
+  await page.keyboard.press('Escape')
+  await expect(drawer).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
 /** Everything a click could change: what's open, where we are, and the Home data on screen. */
 async function observable(page: Page) {
   return {

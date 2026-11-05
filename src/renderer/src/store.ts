@@ -37,7 +37,13 @@ interface UiState {
   status: AppStatus | null
   /** A toast was clicked: Needs you reveals this item. */
   focusedItem: string | null
+  /** Session shown in the drawer (UI_MAP § Session drawer); null = closed. */
+  drawer: string | null
+  /** The outcome of the last action, shown briefly at the bottom of the window. */
+  notice: { text: string; tone: 'ok' | 'error'; at: number } | null
   tick(now: number): void
+  openDrawer(sessionId: string | null): void
+  notify(text: string, tone?: 'ok' | 'error'): void
   toggleSidebar(): void
   cycleEffort(): void
   setComposerCwd(cwd: string): void
@@ -122,7 +128,11 @@ export const useUi = create<UiState>((set) => ({
   announcement: '',
   status: null,
   focusedItem: null,
+  drawer: null,
+  notice: null,
   tick: (now) => set({ now }),
+  openDrawer: (sessionId) => set({ drawer: sessionId }),
+  notify: (text, tone = 'ok') => set({ notice: { text, tone, at: Date.now() } }),
   focusItem: (id) => set({ focusedItem: id }),
   toggleSidebar: () =>
     set((s) => {
