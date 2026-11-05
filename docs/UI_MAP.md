@@ -80,9 +80,12 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 | Reference | AgentDeck | Definition |
 |---|---|---|
 | Time saved this week · 9h 15m · "1h 40m more than last week" | **Agent time this week** | summed working intervals (D-012), "▲/▼ Xh vs last week". **Never "time saved"** |
-| Tasks finished · 24 · "6 finished overnight" | **Tasks finished** | completed turns this week (D-010), "N while you were away" |
+| Tasks finished · 24 · "6 finished overnight" | **Tasks finished** | completed turns this week (D-010), "N while you were away" (finished between losing focus and getting it back, D-060) |
 | Waiting for you · 3 · "The oldest is 2 hours old" | **Waiting for you** | open P1+P2 (D-009), "The oldest is {age} old" |
 | Files made · 18 · "Sheets, decks…" | **Files changed** | distinct paths via edit tools this week (D-011), "across N projects" |
+
+## Collector not running (live mode)
+Before the first snapshot, and whenever the collector exits until main has restarted it, Home shows one status line instead of the cards: "Starting the collector…" or "The collector stopped. AgentDeck is restarting it.", with "Your sessions appear here as soon as it runs. Claude Code is not affected." No card may say "All quiet" or "No agent is running" while nothing is watching (D-059).
 
 ## Main column
 | Reference | AgentDeck | Data / action |

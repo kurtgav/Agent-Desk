@@ -5,6 +5,8 @@
   "private": true,
   "description": "Local Windows dashboard for every Claude Code session on this PC.",
   "author": "Third Code",
+  "license": "MIT",
+  "repository": "github:kurtgav/Agent-Desk",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

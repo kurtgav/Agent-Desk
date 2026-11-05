@@ -10,9 +10,10 @@ Tooling lives in `spikes/`:
 - `capture-server.mjs`: records request bodies and replies with a scripted answer.
 - `run-p.ps1`: one cheap `-p` run.
 - `s7-bg.ps1`: starts a background session and polls it.
-- `redact-fixtures.mjs`, `check-fixtures.mjs`.
+- `redact-fixtures.mjs`. (`check-fixtures.mjs` became `src/collector/normalize.test.ts` in M2.)
+- The scratch project's hook config is generated, not committed: `npm run scratch:hooks -- --capture` rewrites the exact S1 setup (port 47821, the spike token, PermissionRequest timeout 20 s).
 
-Fixtures are in `spikes/fixtures/` (`s1/` holds 54 hook payloads, `otel/` holds 45 OTLP bodies). Raw stdout, stderr and debug logs are in `spikes/out/`, which is git-ignored because debug logs can contain account details.
+Fixtures: the 54 S1 hook payloads moved to `test/fixtures/hooks/2.1.318/` in M2; `spikes/fixtures/otel/` holds 45 OTLP bodies. Raw stdout, stderr and debug logs are in `spikes/out/`, which is git-ignored because debug logs can contain account details.
 
 ---
 

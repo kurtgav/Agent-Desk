@@ -14,7 +14,7 @@ flowchart LR
   end
   subgraph AD[AgentDeck.exe]
     M[Main process<br/>window · tray · toasts · badge<br/>settings.json writer · single instance]
-    C[Collector<br/>utilityProcess<br/>Fastify 127.0.0.1:47821]
+    C[Collector<br/>utilityProcess<br/>node:http 127.0.0.1:47821]
     R[Renderer<br/>React · sandboxed]
   end
   CLI[[claude.exe<br/>agents --json · logs · stop · --bg · attach]]:::ext
@@ -24,24 +24,24 @@ flowchart LR
   SDK[Agent SDK apps] -- POST /v1/events --> C
   C -- spawn, arg array --> CLI
   C <--> DB
-  R -- REST + SSE, token via preload --> C
-  M -- MessagePort: status, restarts --> C
-  M -- IPC: OS actions --> R
+  C -- parentPort: snapshots, status --> M
+  M -- parentPort: visible, focus --> C
+  M -- IPC: snapshot push, app info, OS actions --> R
   classDef ext fill:#f5f5f7,stroke:#a1a1aa
 ```
 
 | Process | Owns | Never does |
 |---|---|---|
 | **Main** | BrowserWindow, tray, `setOverlayIcon` badge, `flashFrame`, toasts (AUMID), login item, single-instance lock, `powerMonitor`. It is the **only writer of `~/.claude/settings.json`** (install, repair, uninstall, launch/quit lifecycle). Restarts the collector if it crashes. | Parse hook traffic |
-| **Collector** (`utilityProcess`) | Fastify on 127.0.0.1: hook ingest, OTLP receiver, Reporter API, REST and SSE for the UI. Also the agents poller, reducers, the attention engine, SQLite, and every `claude` / `code` spawn (cross-spawn, argument arrays, scrubbed env per ADR-0008). | Touch settings files or the window |
-| **Renderer** | UI only: `contextIsolation`, `sandbox`, no Node, strict CSP. It gets `{port, token}` from preload. | Talk to anything but the collector |
+| **Collector** (`utilityProcess`) | `node:http` on 127.0.0.1: hook ingest, OTLP receiver, Reporter API. Also the agents poller, reducers, the attention engine, SQLite, every `claude` / `code` spawn (cross-spawn, argument arrays, scrubbed env per ADR-0008), and the snapshot it posts to main for the UI (D-040). | Touch settings files or the window |
+| **Renderer** | UI only: `contextIsolation`, `sandbox`, no Node, strict CSP. It gets snapshots from main through preload and holds no port or token. | Talk to the collector or the network |
 
 ## 2. Hook ingest path (budget: p95 < 20 ms from request to response, measured collector-side)
 
 1. `POST /hooks`. The collector checks the `Host` header is `127.0.0.1:<port>`, rejects any request that carries an `Origin` header, and requires `X-AgentDeck-Token` (compared in constant time).
 2. **It replies `200` with an empty body at once.** Spike S3 showed a slow reply costs the session up to `timeout` per event. The one exception is `PermissionRequest` while remote approvals are on (ADR-0006).
 3. The body is pushed onto an in-memory queue. `setImmediate` drains it: zod-parse (unknown fields are tolerated and kept), normalize to `AgentEvent` (EVENT_SCHEMA), redact, insert in a single transaction per batch, and run the reducers (Session, Agent, inflight tools, files, attention).
-4. Changed entities are pushed to SSE subscribers as patches. Budget: **event to screen p95 < 1 s**, with a target of < 100 ms.
+4. After a change the collector posts the whole Home snapshot to main, at most every 100 ms (plus a 30 s heartbeat). Main caches it and pushes it to the renderer over IPC (D-040; the renderer can't call the collector without sending an `Origin`). Budget: **event to screen p95 < 1 s**, with a target of < 100 ms. Measured on a real `claude -p` run: p50 113 ms, p95 129 ms, mostly the throttle.
 
 ## 3. Reconcile path: `claude agents --json --all` (ADR-0004)
 
@@ -53,7 +53,7 @@ flowchart LR
 - Surface detection (CLI / Desktop / VS Code) uses the exe path of each new `pid` (D-021). It is looked up once per pid and cached.
 
 ## 4. Storage (ADR-0003)
-SQLite via better-sqlite3 in the collector, with WAL, `synchronous=NORMAL`, and a single connection.
+SQLite via `node:sqlite` in the collector (D-042), with WAL, `synchronous=NORMAL`, and a single connection. M2 ships `events`, `sessions`, `work_spans`, `finished_turns` and `files` (ADR-0003 M2 amendment); the other tables below arrive with the features that fill them.
 
 | Table | Purpose |
 |---|---|
@@ -78,7 +78,7 @@ SQLite via better-sqlite3 in the collector, with WAL, `synchronous=NORMAL`, and 
 | `GET /api/snapshot` | everything the Home screen needs |
 | `GET /api/sessions/:id`, `/api/sessions/:id/events`, `/api/sessions/:id/logs` | session drawer |
 | `POST /api/attention/:id/{approve,reject,dismiss}`, `POST /api/sessions/:id/{stop,attach,open}`, `POST /api/dispatch` | actions |
-| `GET /api/stream` | SSE over `fetch` (the token goes in a header; `EventSource` can't set headers) |
+| ~~`GET /api/stream`~~ | dropped in M2: the UI gets snapshots through main (D-040) |
 | `GET /health` | port-conflict probe: returns `{app:"agentdeck", pid}` only when the token matches |
 
 ## 6. Hook integration lifecycle (ADR-0005)
@@ -113,7 +113,7 @@ Our entries are identified by `type:"http"`, a URL matching `^http://127\.0\.0\.
 | Budget | Measured by |
 |---|---|
 | Hook ingest p95 < 20 ms | collector histogram (`/health?metrics`) + an autocannon run in CI |
-| Event to screen p95 < 1 s | `ts` at ingest vs a renderer `performance.now()` echo, in the Playwright smoke test |
+| Event to screen p95 < 1 s | `tests/live.spec.ts` fails if a posted PreToolUse is not on screen within 1 s; real runs compare each pushed snapshot's newest `lastEventAt` with `Date.now()` in the next animation frame |
 | Idle CPU < 1 % (whole machine, AgentDeck process tree **including spawned `claude agents`**) | perf counters over 10 min with the window hidden (expect about 0.2 % from the poll alone) |
 | RAM < 300 MB | working set of main + collector + renderer |
 
