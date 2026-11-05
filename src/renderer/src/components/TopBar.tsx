@@ -1,15 +1,101 @@
+import { useState, type ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { Ellipsis, House, Plus, Search } from 'lucide-react'
+import { ChevronRight, Ellipsis, House, Plus, Search } from 'lucide-react'
+import type { PauseChoice } from '@shared/bridge'
 import { useUi } from '@/store'
 import { running } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, pending, type Milestone } from './ui'
+import { IntegrationDialog, type IntegrationMode } from './Integration'
+import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, cn, pending, type Milestone } from './ui'
 
 const MENU_ITEMS: [string, Milestone][] = [
-  ['Pause notifications', 'M3'],
   ['Diagnostics', 'M5'],
   ['Settings', 'M5']
 ]
+
+const ITEM = 'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none data-[highlighted]:bg-ground'
+const clock = (t: number): string => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+type Tone = 'done' | 'idle' | 'failed'
+
+function Chip({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <>
+      <span className="size-1.5 rounded-full" style={{ background: `var(--${tone})` }} aria-hidden />
+      {children}
+    </>
+  )
+}
+const CHIP = 'inline-flex h-[26px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium'
+const tint = (tone: Tone) => ({ background: `var(--${tone}-bg)`, color: `var(--${tone}-ink)` })
+
+/** UI_MAP Live chip: Live / Paused / Hooks missing (click to repair). Live mode only; NotLive covers a stopped collector. */
+function LiveChip({ onRepair }: { onRepair: () => void }) {
+  const status = useUi((s) => s.status)
+  const link = useUi((s) => s.link)
+  const now = useUi((s) => s.now)
+  if (!status || link !== 'up') return null
+  if (status.hooks !== 'installed' || status.conflicts.length > 0) {
+    const why = status.hooks === 'error' ? status.hooksError : status.conflicts[0] ?? 'Sessions are not reporting to AgentDeck yet.'
+    return (
+      <Hint label={`${why} Click to repair.`}>
+        <button type="button" onClick={onRepair} style={tint('failed')} className={cn(CHIP, 'transition-transform duration-150 ease-out active:scale-[0.96]')}>
+          <Chip tone="failed">Hooks missing</Chip>
+        </button>
+      </Hint>
+    )
+  }
+  if (status.pausedUntil !== null && now < status.pausedUntil) {
+    return (
+      <Hint label={`Notifications paused until ${clock(status.pausedUntil)}. Resume from the ⋯ menu.`}>
+        <span tabIndex={0} style={tint('idle')} className={CHIP}>
+          <Chip tone="idle">Paused</Chip>
+        </span>
+      </Hint>
+    )
+  }
+  return (
+    <Hint label="Hooks installed. Your sessions report to AgentDeck as they work.">
+      <span tabIndex={0} style={tint('done')} className={CHIP}>
+        <Chip tone="done">Live</Chip>
+      </span>
+    </Hint>
+  )
+}
+
+function PauseMenu() {
+  const status = useUi((s) => s.status)
+  const now = useUi((s) => s.now)
+  if (!status) return null // demo: nothing to pause
+  const paused = status.pausedUntil !== null && now < status.pausedUntil
+  const pause = (c: PauseChoice | null): void => void window.agentdeck?.pauseNotifications(c).catch(() => undefined)
+  return (
+    <Menu.Sub>
+      <Menu.SubTrigger className={ITEM}>
+        <span className="flex flex-col">
+          <span>{paused ? 'Notifications paused' : 'Pause notifications'}</span>
+          {paused && <span className="text-[12px] text-muted">Until {clock(status.pausedUntil!)}</span>}
+        </span>
+        <ChevronRight size={14} strokeWidth={1.75} className="ml-auto text-muted" />
+      </Menu.SubTrigger>
+      <Menu.Portal>
+        <Menu.SubContent sideOffset={6} className="z-50 min-w-48 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
+          {paused && (
+            <Menu.Item className={ITEM} onSelect={() => pause(null)}>
+              Resume now
+            </Menu.Item>
+          )}
+          <Menu.Item className={ITEM} onSelect={() => pause('hour')}>
+            For 1 hour
+          </Menu.Item>
+          <Menu.Item className={ITEM} onSelect={() => pause('tomorrow')}>
+            Until tomorrow, 08:00
+          </Menu.Item>
+        </Menu.SubContent>
+      </Menu.Portal>
+    </Menu.Sub>
+  )
+}
 
 function ActiveAgents() {
   const active = running(useUi((s) => s.snapshot))
@@ -38,6 +124,8 @@ function ActiveAgents() {
 
 export function TopBar() {
   const mode = useUi((s) => s.snapshot.mode)
+  const live = useUi((s) => s.status !== null)
+  const [dialog, setDialog] = useState<IntegrationMode | null>(null)
   return (
     <header className="app-drag caption-inset flex h-12 flex-none items-center gap-3 border-b border-line bg-surface pl-4">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[14px] font-medium">
@@ -69,6 +157,7 @@ export function TopBar() {
             </span>
           </Hint>
         )}
+        <LiveChip onRepair={() => setDialog('install')} />
         <ActiveAgents />
         <Button onClick={() => document.getElementById('composer-input')?.focus()}>
           <Plus size={15} strokeWidth={1.75} />
@@ -82,6 +171,13 @@ export function TopBar() {
           </Menu.Trigger>
           <Menu.Portal>
             <Menu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
+              <PauseMenu />
+              {live && (
+                <Menu.Item className={ITEM} onSelect={() => setDialog('uninstall')}>
+                  Uninstall integration…
+                </Menu.Item>
+              )}
+              {live && <Menu.Separator className="my-1 h-px bg-rule" />}
               {MENU_ITEMS.map(([label, m]) => (
                 <PendingMenuItem key={label} label={label} m={m} />
               ))}
@@ -89,6 +185,7 @@ export function TopBar() {
           </Menu.Portal>
         </Menu.Root>
       </div>
+      <IntegrationDialog mode={dialog} onClose={() => setDialog(null)} />
     </header>
   )
 }
