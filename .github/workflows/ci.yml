@@ -22,6 +22,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # The runner's default screen is smaller than the 1440x924 reference window the smoke tests open.
+      - name: Use a 1920x1080 display
+        shell: powershell
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
       # Builds the app, then runs the Playwright-Electron smoke tests against out/.
       - run: npm run test:smoke
       - if: failure()
