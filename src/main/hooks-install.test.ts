@@ -195,8 +195,8 @@ describe('known limit (D-084)', () => {
 
 describe('reading the file', () => {
   it('an empty or blank file counts as {}', () => {
-    for (const blank of ['', '  \n', '﻿']) {
-      expect(json(install(blank).after.replace(/^﻿/, '')).hooks.Stop).toHaveLength(1)
+    for (const blank of ['', '  \n', '\uFEFF']) {
+      expect(json(install(blank).after.replace(/^\uFEFF/, '')).hooks.Stop).toHaveLength(1)
       expect(uninstall(blank)).toMatchObject({ changed: false, after: blank })
     }
   })
