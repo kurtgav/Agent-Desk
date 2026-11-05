@@ -5,6 +5,11 @@ dist/
 spikes/out/
 spikes/scratch/hello.txt
 spikes/scratch/sub/
+# Written by `npm run scratch:hooks`; holds the local hook token
+spikes/scratch/.claude/settings.local.json
 .taste-skill/
 test-results/
 playwright-report/
+*.tsbuildinfo
+# Claude Code session lock, not project config
+.claude/scheduled_tasks.lock
