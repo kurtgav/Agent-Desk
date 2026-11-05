@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs'
 import type { Server } from 'node:http'
+import type { SessionDetail } from '@shared/detail'
 import type { Snapshot } from '@shared/snapshot'
 import { DEFAULT_STALL, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
@@ -35,6 +36,7 @@ export interface Collector {
   setVisible(visible: boolean): void
   setFocused(focused: boolean, at: number): void
   dismiss(id: string): void
+  detail(sessionId: string): SessionDetail | null
   close(): Promise<void>
 }
 
@@ -156,6 +158,7 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       o.onChange()
     },
     dismiss: (id) => guarded(() => store.dismiss(id, Date.now(), stallCfg)),
+    detail: (sessionId) => store.detail(sessionId),
     close: async () => {
       clearInterval(pruner)
       clearInterval(stallTimer)

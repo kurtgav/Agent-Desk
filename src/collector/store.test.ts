@@ -213,3 +213,39 @@ describe('weekStart (D-008)', () => {
     expect(new Date(weekStart(new Date(2026, 10, 8, 23).getTime())).getDate()).toBe(2) // Sunday belongs to the week before
   })
 })
+
+describe('Store.detail (UI_MAP § Session drawer)', () => {
+  const t0 = Date.UTC(2026, 10, 3, 9)
+  const hook = (kind: string, ts: number, extra: Record<string, unknown> = {}) =>
+    normalizeHook(JSON.stringify({ session_id: 'd', hook_event_name: kind, cwd: 'D:\\p', ...extra }), ts)!
+
+  it('serves the newest events first, the plan, the changed files and the main agent final message', () => {
+    const store = open(':memory:', t0)
+    store.ingest([
+      hook('UserPromptSubmit', t0, { prompt: 'go' }),
+      hook('TaskCreated', t0 + 10, { task_id: '1', task_subject: 'Write the test' }),
+      hook('TaskCreated', t0 + 20, { task_id: '2', task_subject: 'Fix the bug' }),
+      hook('PreToolUse', t0 + 30, { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: 'D:\\p\\a.ts', old_string: 'x', new_string: 'y' } }),
+      hook('PostToolUse', t0 + 40, { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: 'D:\\p\\a.ts', old_string: 'x', new_string: 'y' }, tool_response: {} }),
+      hook('TaskCompleted', t0 + 50, { task_id: '1', task_subject: 'Write the test' }),
+      hook('SubagentStop', t0 + 60, { agent_id: 'a1', agent_type: 'Explore', last_assistant_message: 'Subagent report' }),
+      hook('Stop', t0 + 70, { stop_hook_active: false, last_assistant_message: 'All green.' })
+    ])
+    const d = store.detail('d')!
+    expect(d.session.id).toBe('d')
+    expect(d.timeline.map((e) => e.kind)).toEqual([
+      'turn.stopped', 'subagent.stopped', 'task.completed', 'tool.finished', 'tool.started', 'task.created', 'task.created', 'session.prompt'
+    ])
+    expect(d.timeline[1]).toMatchObject({ agentType: 'Explore' })
+    expect(d.tasks).toEqual([
+      { id: '1', subject: 'Write the test', done: true },
+      { id: '2', subject: 'Fix the bug', done: false }
+    ])
+    expect(d.files.map((f) => [f.path, f.tool])).toEqual([['D:\\p\\a.ts', 'Edit']])
+    expect(d.finalMessage).toBe('All green.') // the subagent's report is not the session's
+  })
+
+  it('is null for a session it never saw', () => {
+    expect(open(':memory:', t0).detail('nope')).toBeNull()
+  })
+})

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import type { PlanTask, SessionDetail } from '@shared/detail'
 import { pathKey } from '@shared/paths'
 import type { ChangedFile, Snapshot } from '@shared/snapshot'
 import {
@@ -60,6 +61,9 @@ export const DEDUPE_MS = 2_000
 const MAX_SESSIONS = 50
 const MAX_FILES = 200
 const MAX_AGENT_TYPES = 5
+/** The drawer (UI_MAP § Session drawer): newest events and files of one session. */
+const TIMELINE_MAX = 200
+const DETAIL_FILES_MAX = 100
 
 /** D-008: a week starts Monday 00:00 local time. */
 export function weekStart(now: number): number {
@@ -341,6 +345,36 @@ export class Store {
         .map(([t]) => t),
       agentDefinitionCount: extras.agentDefinitionCount
     }
+  }
+
+  /** One session for the drawer, from the database (30 days), or null when it is unknown. */
+  detail(sessionId: string): SessionDetail | null {
+    const s = this.sessions.get(sessionId)
+    if (!s) return null
+    const timeline = this.db
+      .prepare('SELECT id, ts, kind, agent_type, summary FROM events WHERE session_id = ? ORDER BY ts DESC, seq DESC LIMIT ?')
+      .all(sessionId, TIMELINE_MAX)
+      .map((r) => ({ id: String(r.id), ts: Number(r.ts), kind: String(r.kind), agentType: r.agent_type === null ? null : String(r.agent_type), summary: String(r.summary) }))
+    const tasks = new Map<string, PlanTask>()
+    for (const r of this.db
+      .prepare("SELECT kind, payload FROM events WHERE session_id = ? AND kind IN ('task.created', 'task.completed') ORDER BY seq")
+      .all(sessionId)) {
+      const p = JSON.parse(String(r.payload)) as Record<string, unknown>
+      if (typeof p.task_id !== 'string') continue
+      const prev = tasks.get(p.task_id)
+      const subject = typeof p.task_subject === 'string' ? p.task_subject : (prev?.subject ?? 'A task')
+      tasks.set(p.task_id, { id: p.task_id, subject, done: r.kind === 'task.completed' || (prev?.done ?? false) })
+    }
+    // A bare column next to MAX() takes its value from the row that holds the maximum (SQLite § bare columns).
+    const files = this.db
+      .prepare('SELECT path, tool, MAX(changed_at) AS at FROM files WHERE session_id = ? GROUP BY path_key ORDER BY at DESC LIMIT ?')
+      .all(sessionId, DETAIL_FILES_MAX)
+      .map((r) => ({ path: String(r.path), sessionId, tool: String(r.tool), changedAt: Number(r.at) }))
+    const stop = this.db
+      .prepare("SELECT payload FROM events WHERE session_id = ? AND kind = 'turn.stopped' AND agent_id IS NULL ORDER BY seq DESC LIMIT 1")
+      .get(sessionId)
+    const message = stop ? (JSON.parse(String(stop.payload)) as Record<string, unknown>).last_assistant_message : undefined
+    return { session: toSession(s), timeline, tasks: [...tasks.values()], files, finalMessage: typeof message === 'string' && message.trim() ? message : null }
   }
 
   /** ADR-0003 retention: 30 days on disk; memory keeps only what this week and last week need. */

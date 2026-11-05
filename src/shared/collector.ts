@@ -1,3 +1,4 @@
+import type { SessionDetail } from './detail'
 import type { Snapshot } from './snapshot'
 
 /** Main ↔ collector over the utility process's parentPort (ARCHITECTURE § 2). */
@@ -19,8 +20,11 @@ export type ToCollector =
   | { type: 'focus'; focused: boolean; at: number }
   /** The user dismissed a P2–P4 item in the window. */
   | { type: 'dismiss'; id: string }
+  /** A request: the reply carries the same `reqId`. Requests are never replayed to a restarted collector. */
+  | { type: 'detail'; reqId: number; sessionId: string }
 
 export type FromCollector =
   | { type: 'ready'; port: number }
+  | { type: 'detail'; reqId: number; detail: SessionDetail | null }
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'error'; message: string }

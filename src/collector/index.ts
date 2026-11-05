@@ -53,5 +53,13 @@ parent.on('message', (e: { data: ToCollector }) => {
     collector?.setFocused(m.focused, m.at)
   } else if (m.type === 'dismiss') {
     collector?.dismiss(m.id)
+  } else if (m.type === 'detail') {
+    let detail = null
+    try {
+      detail = collector?.detail(m.sessionId) ?? null
+    } catch (err) {
+      report(err) // the drawer shows "could not load"; main never waits forever
+    }
+    post({ type: 'detail', reqId: m.reqId, detail })
   }
 })

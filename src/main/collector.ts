@@ -6,9 +6,13 @@ export function restartDelay(attempt: number): number {
   return Math.min(500 * 2 ** attempt, 30_000)
 }
 const HEALTHY_MS = 30_000
+/** A request the collector hasn't answered by then resolves to null (it is busy, or restarting). */
+const REQUEST_TIMEOUT_MS = 5_000
 
 export interface Supervisor {
   post(m: ToCollector): void
+  /** Sends a request built around a fresh `reqId`; resolves with the reply, or null on timeout or exit. */
+  request(build: (reqId: number) => ToCollector): Promise<FromCollector | null>
   stop(): void
 }
 
@@ -27,8 +31,10 @@ export function superviseCollector(
   let attempt = 0
   let startedAt = 0
   let retry: NodeJS.Timeout | null = null
-  // Visibility and focus are state: a restarted collector must get the latest of each.
+  // Visibility and focus are state: a restarted collector must get the latest of each. Commands and requests are not replayed.
   const latest = new Map<string, ToCollector>()
+  const waiting = new Map<number, (m: FromCollector | null) => void>()
+  let nextReq = 1
 
   const spawn = (): void => {
     retry = null
@@ -39,9 +45,13 @@ export function superviseCollector(
       execArgv: ['--disable-warning=ExperimentalWarning']
     })
     child = proc
-    proc.on('message', (m: FromCollector) => onMessage(m))
+    proc.on('message', (m: FromCollector) => {
+      if ('reqId' in m) waiting.get(m.reqId)?.(m)
+      else onMessage(m)
+    })
     proc.on('exit', () => {
       if (child === proc) child = null
+      for (const answer of [...waiting.values()]) answer(null)
       if (stopped) return
       onDown()
       if (Date.now() - startedAt > HEALTHY_MS) attempt = 0
@@ -54,8 +64,23 @@ export function superviseCollector(
 
   return {
     post: (m) => {
-      latest.set(m.type, m)
+      if (m.type === 'visible' || m.type === 'focus') latest.set(m.type, m)
       child?.postMessage(m)
+    },
+    request: (build) => {
+      if (!child) return Promise.resolve(null)
+      const reqId = nextReq++
+      const proc = child
+      return new Promise((resolve) => {
+        const answer = (m: FromCollector | null): void => {
+          clearTimeout(timer)
+          waiting.delete(reqId)
+          resolve(m)
+        }
+        const timer = setTimeout(() => answer(null), REQUEST_TIMEOUT_MS)
+        waiting.set(reqId, answer)
+        proc.postMessage(build(reqId))
+      })
     },
     stop: () => {
       stopped = true
