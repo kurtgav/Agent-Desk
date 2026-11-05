@@ -15,7 +15,7 @@ export default defineConfig(
     languageOptions: { globals: globals.browser }
   },
   {
-    files: ['src/main/**', 'src/preload/**', 'tests/**', '*.config.*'],
+    files: ['src/main/**', 'src/collector/**', 'src/preload/**', 'tests/**', 'scripts/**', '*.config.*'],
     languageOptions: { globals: globals.node }
   }
 )

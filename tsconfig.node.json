@@ -21,6 +21,7 @@
     "vitest.config.mts",
     "playwright.config.mts",
     "src/main/**/*",
+    "src/collector/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
     "tests/**/*"
