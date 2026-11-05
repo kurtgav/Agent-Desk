@@ -1,10 +1,8 @@
 import { create } from 'zustand'
-import type { AppStatus } from '@shared/bridge'
+import { EFFORTS, type AppStatus, type Effort } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from './demo/snapshot'
 
-export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-export type Effort = (typeof EFFORTS)[number]
 export type Outcome = 'approved' | 'rejected' | 'dismissed'
 
 const SIDEBAR_KEY = 'agentdeck.sidebarCollapsed'

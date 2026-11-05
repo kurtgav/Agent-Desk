@@ -121,6 +121,34 @@ test('a Running now row opens the session drawer; demo actions run nothing; Esc 
   expect(errors).toEqual([])
 })
 
+test('composer: Shift+Enter adds a line, @ mentions a subagent, Agent picks one, Enter sends (demo runs nothing)', async () => {
+  const { page, errors } = await open(1440, 924)
+  const box = page.locator('#composer-input')
+  const send = page.getByRole('button', { name: 'Dispatch task' })
+  await expect(send).toHaveAttribute('aria-disabled', 'true')
+  await box.fill('Fix the flaky login test')
+  await expect(send).toHaveAttribute('aria-disabled', 'false')
+  await box.press('Shift+Enter')
+  await box.pressSequentially('and the retry')
+  await expect(box).toHaveValue('Fix the flaky login test\nand the retry')
+
+  await page.getByRole('button', { name: 'Mention a subagent' }).click()
+  const mention = page.getByRole('dialog', { name: 'Mention a subagent' })
+  await mention.getByRole('textbox', { name: 'Search subagents' }).fill('review')
+  await mention.getByRole('button', { name: 'code-reviewer', exact: true }).click()
+  await expect(box).toHaveValue('Fix the flaky login test\nand the retry @agent-code-reviewer ')
+  await expect(box).toBeFocused()
+
+  await page.getByRole('button', { name: 'Subagent: default. Change subagent' }).click()
+  await page.getByRole('dialog', { name: 'Run as subagent' }).getByRole('button', { name: 'Plan', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Subagent: Plan. Change subagent' })).toBeVisible()
+
+  await box.press('Enter')
+  await expect(page.getByTestId('notice')).toHaveText('Demo data: nothing was dispatched.')
+  await expect(box).toHaveValue(/@agent-code-reviewer/)
+  expect(errors).toEqual([])
+})
+
 /** Everything a click could change: what's open, where we are, and the Home data on screen. */
 async function observable(page: Page) {
   return {
