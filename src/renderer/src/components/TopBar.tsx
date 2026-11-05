@@ -173,6 +173,11 @@ export function TopBar() {
             <Menu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
               <PauseMenu />
               {live && (
+                <Menu.Item className={ITEM} onSelect={() => setDialog('install')}>
+                  Remote approvals…
+                </Menu.Item>
+              )}
+              {live && (
                 <Menu.Item className={ITEM} onSelect={() => setDialog('uninstall')}>
                   Uninstall integration…
                 </Menu.Item>

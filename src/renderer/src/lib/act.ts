@@ -1,5 +1,5 @@
-import type { ActionResult, AgentDef, DispatchRequest, DispatchResult, SessionAction } from '@shared/bridge'
-import type { Session } from '@shared/snapshot'
+import type { ActionResult, AgentDef, DispatchRequest, DispatchResult, SessionAction, Verdict } from '@shared/bridge'
+import type { AttentionItem, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { projectName } from './selectors'
 
@@ -23,6 +23,16 @@ export async function sessionAction(action: SessionAction, s: Session): Promise<
   if (demo()) return notify('Demo data: nothing was run.')
   const r = await window.agentdeck!.act(action, s.id).catch(() => FAILED)
   notify(r.ok ? DONE[action](s) : r.error, r.ok ? 'ok' : 'error')
+}
+
+/** Approve-once or Reject one held request (ADR-0006). Demo answers locally and sends nothing (D-035). */
+export async function answerItem(item: AttentionItem, verdict: Verdict): Promise<void> {
+  const { notify, resolve } = useUi.getState()
+  if (demo()) return resolve(item.id, verdict === 'approve' ? 'approved' : 'rejected')
+  const r = await window.agentdeck!.decide(item.id, verdict).catch(() => FAILED)
+  const what = item.title.replace(/`/g, '')
+  if (!r.ok) return notify(r.error, 'error')
+  notify(verdict === 'approve' ? `Approved once: ${what}` : `Rejected: ${what}. Claude Code was told "Rejected in AgentDeck".`)
 }
 
 /** The composer's task (brief § Composer). Null in demo, where nothing is dispatched. */

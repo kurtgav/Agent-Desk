@@ -3,9 +3,10 @@ import type { PlanTask, SessionDetail } from '@shared/detail'
 import { pathKey } from '@shared/paths'
 import type { ChangedFile, Snapshot } from '@shared/snapshot'
 import {
-  attend, dismiss, emptyAttention, fastPollUntil, stall, toItem, type AttentionRecord, type AttentionState, type Attended, type StallConfig
+  answer, attend, dismiss, emptyAttention, fastPollUntil, stall, toItem, type AttentionRecord, type AttentionState, type Attended, type StallConfig
 } from './attention'
 import type { AgentEvent } from './events'
+import type { AuditRow, HoldOutcome } from './holds'
 import { closeStale, correlate, duePoll, reduceSession, toSession, type SessionState } from './reduce'
 
 /** ADR-0003. Each entry runs once, in order, inside one transaction; `user_version` records progress. */
@@ -47,7 +48,22 @@ const MIGRATIONS = [
      data TEXT NOT NULL
    );
    CREATE INDEX attention_items_state ON attention_items(state);
-   CREATE INDEX attention_items_opened ON attention_items(opened_at);`
+   CREATE INDEX attention_items_opened ON attention_items(opened_at);`,
+  // M4: the remote approvals audit log (ADR-0006), one row per held request, written when it settles.
+  `CREATE TABLE approvals (
+     seq INTEGER PRIMARY KEY,
+     ts INTEGER NOT NULL,
+     requested_at INTEGER NOT NULL,
+     item_id TEXT NOT NULL,
+     session_id TEXT NOT NULL,
+     agent_id TEXT,
+     tool_name TEXT,
+     title TEXT NOT NULL,
+     input_hash TEXT NOT NULL,
+     risk_flags TEXT NOT NULL,
+     outcome TEXT NOT NULL
+   );
+   CREATE INDEX approvals_ts ON approvals(ts);`
 ]
 
 const DAY_MS = 86_400_000
@@ -146,7 +162,9 @@ export class Store {
     }
     this.closeStaleSessions()
     const open = this.db.prepare("SELECT data FROM attention_items WHERE state = 'open' ORDER BY opened_at").all()
-    this.attention = { open: open.map((r) => JSON.parse(String(r.data)) as AttentionRecord), quiet: {} }
+    // A hold lives in a connection, so none survives a restart: the terminal asks instead.
+    const unheld = (i: AttentionRecord): AttentionRecord => (i.held ? { ...i, held: false, hint: null } : i)
+    this.attention = { open: open.map((r) => unheld(JSON.parse(String(r.data)) as AttentionRecord)), quiet: {} }
     this.spans = this.db
       .prepare('SELECT session_id, start_ts, end_ts FROM work_spans WHERE end_ts >= ?')
       .all(since)
@@ -223,6 +241,59 @@ export class Store {
     this.tx(() => this.saveAttention(a))
     this.attention = a.state
     return true
+  }
+
+  /**
+   * Ingests a PermissionRequest that AgentDeck holds (ADR-0006) and returns its approval item: the one this event
+   * opened, or the open one a repeated delivery matched. Ingesting closed this agent's earlier P1 items, so it is the last.
+   */
+  holdFor(ev: AgentEvent): AttentionRecord | null {
+    this.ingest([ev])
+    return this.attention.open.filter((i) => i.sessionId === ev.sessionId && i.agentId === ev.agentId && i.kind === 'approval' && i.source === 'hook').at(-1) ?? null
+  }
+
+  isOpen(id: string): boolean {
+    return this.attention.open.some((i) => i.id === id)
+  }
+
+  /** Marks an open approval as waiting in AgentDeck, or not any more. Returns whether it changed. */
+  setHeld(id: string, held: boolean, hint: string | null): boolean {
+    const item = this.attention.open.find((i) => i.id === id)
+    if (!item || item.held === held) return false
+    const next = { ...item, held, hint }
+    this.db.prepare('UPDATE attention_items SET data = ? WHERE id = ?').run(JSON.stringify(next), id)
+    this.attention = { ...this.attention, open: this.attention.open.map((i) => (i === item ? next : i)) }
+    return true
+  }
+
+  /** Approve or Reject went out: the held item closes, resolved by AgentDeck. Returns whether it closed. */
+  answer(id: string, now: number): boolean {
+    const a = answer(this.attention, id, now)
+    if (!a.closed.length) return false
+    this.tx(() => this.saveAttention(a))
+    this.attention = a.state
+    return true
+  }
+
+  audit(row: AuditRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO approvals (ts, requested_at, item_id, session_id, agent_id, tool_name, title, input_hash, risk_flags, outcome)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(row.ts, row.requestedAt, row.itemId, row.sessionId, row.agentId, row.toolName, row.title, row.inputHash, JSON.stringify(row.riskFlags), row.outcome)
+  }
+
+  /** The audit log, newest first. */
+  auditLog(limit: number): AuditRow[] {
+    return this.db
+      .prepare('SELECT * FROM approvals ORDER BY ts DESC, seq DESC LIMIT ?')
+      .all(limit)
+      .map((r) => ({
+        ts: Number(r.ts), requestedAt: Number(r.requested_at), itemId: String(r.item_id), sessionId: String(r.session_id),
+        agentId: r.agent_id === null ? null : String(r.agent_id), toolName: r.tool_name === null ? null : String(r.tool_name),
+        title: String(r.title), inputHash: String(r.input_hash), riskFlags: JSON.parse(String(r.risk_flags)) as string[], outcome: String(r.outcome) as HoldOutcome
+      }))
   }
 
   /** The 1 s poll runs until this time (0 = never), while a P1 item is open. */
@@ -387,6 +458,7 @@ export class Store {
       this.db.prepare('DELETE FROM finished_turns WHERE ts < ?').run(cutoff)
       this.db.prepare('DELETE FROM files WHERE changed_at < ?').run(cutoff)
       this.db.prepare('DELETE FROM attention_items WHERE COALESCE(resolved_at, opened_at) < ?').run(cutoff)
+      this.db.prepare('DELETE FROM approvals WHERE ts < ?').run(cutoff)
     })
     this.attention = { ...this.attention, open: this.attention.open.filter((i) => i.openedAt >= cutoff) }
     const since = lastWeekStart(now)

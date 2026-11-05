@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Popover from '@radix-ui/react-popover'
 import { CircleX, Eye, Hourglass, MessageCircle, ShieldAlert, Terminal } from 'lucide-react'
+import type { Verdict } from '@shared/bridge'
 import type { AttentionItem, AttentionKind, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
-import { sessionAction } from '@/lib/act'
+import { answerItem, sessionAction } from '@/lib/act'
 import { ago } from '@/lib/format'
 import { byPriority, projectName, sessionIndex, waitingWithoutItem } from '@/lib/selectors'
 import { Avatar } from './Avatar'
@@ -23,11 +24,11 @@ const KIND: Record<AttentionKind, { icon: Icon; tone: 'needs' | 'failed' | 'idle
   review: { icon: Eye, tone: 'working', label: 'Ready for review' }
 }
 
-function ApproveButton({ item, session }: { item: AttentionItem; session: Session | undefined }) {
-  const resolve = useUi((s) => s.resolve)
+function ApproveButton({ item, session, answer }: { item: AttentionItem; session: Session | undefined; answer: (v: Verdict) => void }) {
+  const demo = useUi((s) => s.snapshot.mode === 'demo')
   if (!item.riskFlags.length) {
     return (
-      <Button variant="primary" size="sm" onClick={() => resolve(item.id, 'approved')}>
+      <Button variant="primary" size="sm" onClick={() => answer('approve')}>
         Approve
       </Button>
     )
@@ -56,13 +57,15 @@ function ApproveButton({ item, session }: { item: AttentionItem; session: Sessio
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[12px] text-muted">Demo data: approving here sends nothing.</p>
+          <p className="mt-3 text-[12px] text-muted">
+            {demo ? 'Demo data: approving here sends nothing.' : 'Approve lets this one call run. AgentDeck adds no permission rule.'}
+          </p>
           <div className="mt-5 flex justify-end gap-2">
             <Dialog.Close asChild>
               <Button size="sm">Cancel</Button>
             </Dialog.Close>
             <Dialog.Close asChild>
-              <Button variant="primary" size="sm" onClick={() => resolve(item.id, 'approved')}>
+              <Button variant="primary" size="sm" onClick={() => answer('approve')}>
                 Approve
               </Button>
             </Dialog.Close>
@@ -96,14 +99,23 @@ function AnswerInTerminal({ session }: { session: Session }) {
 function Actions({ item, session }: { item: AttentionItem; session: Session | undefined }) {
   const resolve = useUi((s) => s.resolve)
   const open = useUi((s) => s.openDrawer)
+  const busy = useRef(false)
+  // One click, one answer: a double click must not send a second one (approve-once, ADR-0006).
+  const answer = (v: Verdict): void => {
+    if (busy.current) return
+    busy.current = true
+    void answerItem(item, v).finally(() => {
+      busy.current = false
+    })
+  }
   if (item.kind === 'approval' || item.kind === 'question') {
     if (item.held) {
       return (
         <>
-          <Button size="sm" onClick={() => resolve(item.id, 'rejected')}>
+          <Button size="sm" onClick={() => answer('reject')}>
             Reject
           </Button>
-          <ApproveButton item={item} session={session} />
+          <ApproveButton item={item} session={session} answer={answer} />
         </>
       )
     }

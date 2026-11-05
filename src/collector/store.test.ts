@@ -167,6 +167,48 @@ describe('Store', () => {
       expect(p1.tick(t0 + 400 + 60_001, cfg)).toBe(true) // working, nothing in flight, quiet for over N
       expect(p1.snapshot(t0 + 400 + 60_001, EXTRAS).attention).toEqual([expect.objectContaining({ priority: 3, kind: 'stuck' })])
     })
+
+    describe('held approvals (ADR-0006)', () => {
+      const held = (store: Store) => {
+        store.ingest([hook('UserPromptSubmit', t0, { prompt: 'go' }), hook('PreToolUse', t0 + 100, pre)])
+        const item = store.holdFor(hook('PermissionRequest', t0 + 200, { tool_name: 'Bash', tool_input: pre.tool_input }))!
+        expect(store.setHeld(item.id, true, 'Waits here.')).toBe(true)
+        return item
+      }
+
+      it('holdFor returns the approval the request opened; an answer closes it by agentdeck and the audit row stays', () => {
+        const file = tempDb()
+        const store = open(file)
+        const item = held(store)
+        expect(item).toMatchObject({ kind: 'approval', title: 'Run `git push --force`', riskFlags: ['Force push'] })
+        expect(store.snapshot(t0 + 200, EXTRAS).attention).toEqual([expect.objectContaining({ id: item.id, held: true, hint: 'Waits here.' })])
+        expect(store.setHeld(item.id, true, 'Waits here.')).toBe(false) // no change
+
+        expect(store.answer(item.id, t0 + 300)).toBe(true)
+        expect(store.isOpen(item.id)).toBe(false)
+        const row = { itemId: item.id, sessionId: 'a', agentId: null, toolName: 'Bash', title: item.title, riskFlags: item.riskFlags, inputHash: 'h', requestedAt: t0 + 200, ts: t0 + 300, outcome: 'approved' as const }
+        store.audit(row)
+        expect(store.auditLog(10)).toEqual([row])
+        const db = new DatabaseSync(file)
+        expect(db.prepare('SELECT resolved_by FROM attention_items').all()).toEqual([{ resolved_by: 'agentdeck' }])
+        db.close()
+        store.prune(t0 + 300 + RETENTION_MS + 1)
+        expect(store.auditLog(10)).toEqual([])
+      })
+
+      it('only a held item can be answered, and no hold survives a restart', () => {
+        const file = tempDb()
+        const first = open(file)
+        const item = held(first)
+        expect(first.setHeld(item.id, false, null)).toBe(true)
+        expect(first.answer(item.id, t0 + 300)).toBe(false) // the terminal has it now
+        first.setHeld(item.id, true, 'Waits here.')
+        first.close()
+        stores.pop()
+        const again = open(file, t0 + 1_000)
+        expect(again.snapshot(t0 + 1_000, EXTRAS).attention).toEqual([expect.objectContaining({ id: item.id, held: false, hint: null })])
+      })
+    })
   })
 
   it('ends a working stretch at its last event across a restart, not at the next launch (D-057)', () => {

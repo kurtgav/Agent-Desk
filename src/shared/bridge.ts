@@ -14,6 +14,12 @@ export interface AppInfo {
  */
 export type HooksState = 'installed' | 'missing' | 'error'
 
+/** ADR-0006: off by default. While on, a permission request waits in AgentDeck up to `waitSec` before the terminal asks. */
+export interface RemoteApprovals {
+  enabled: boolean
+  waitSec: number
+}
+
 export interface AppStatus {
   hooks: HooksState
   /** Why `error`, in plain words. */
@@ -22,7 +28,12 @@ export interface AppStatus {
   conflicts: string[]
   /** Toasts are paused until this time (ms epoch); null = not paused. */
   pausedUntil: number | null
+  /** As the user last installed the hooks; the toggle lives in the install dialog. */
+  remoteApprovals: RemoteApprovals
 }
+
+/** The answer to one held permission request: approve-once or reject (ADR-0006). */
+export type Verdict = 'approve' | 'reject'
 
 /** A dry run of an install or uninstall: what would change in settings.json, secrets masked. */
 export type HooksPreview =
@@ -78,11 +89,14 @@ export interface AgentDeckBridge {
   dismiss(id: string): Promise<void>
   /** For one hour, until 08:00 tomorrow, or null to resume. */
   pauseNotifications(until: PauseChoice | null): Promise<void>
-  previewInstall(): Promise<HooksPreview>
+  /** `remoteApprovals` changes the PermissionRequest entry's timeout, so it is part of what the diff shows. */
+  previewInstall(remoteApprovals: boolean): Promise<HooksPreview>
   previewUninstall(): Promise<HooksPreview>
   /** Writes settings.json; the renderer calls these only after the user confirmed the preview's diff. */
-  installHooks(): Promise<HooksResult>
+  installHooks(remoteApprovals: boolean): Promise<HooksResult>
   uninstallHooks(): Promise<HooksResult>
+  /** Answers one held permission request. Fails when it no longer waits (time ran out, or it was answered elsewhere). */
+  decide(itemId: string, verdict: Verdict): Promise<ActionResult>
   /** The drawer's data, or null when the collector doesn't know the session (or isn't running). */
   getDetail(sessionId: string): Promise<SessionDetail | null>
   /** Stop is only sent after the user confirmed it in the window. */
@@ -110,6 +124,7 @@ export const IPC = {
   statusPush: 'status:push',
   focusItem: 'attention:focus',
   dismiss: 'attention:dismiss',
+  decide: 'attention:decide',
   pause: 'notifications:pause',
   previewInstall: 'hooks:preview-install',
   previewUninstall: 'hooks:preview-uninstall',

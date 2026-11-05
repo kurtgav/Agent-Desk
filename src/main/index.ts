@@ -6,7 +6,8 @@ import {
 } from 'electron'
 import { z } from 'zod'
 import {
-  EFFORTS, IPC, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult
+  EFFORTS, IPC, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
+  type RemoteApprovals
 } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
 import type { SessionDetail } from '@shared/detail'
@@ -16,9 +17,9 @@ import { act, LOCAL_PATH, logs, openFile, runClaudeIn, type ActionDeps } from '.
 import { agentList } from './agents'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
-import { readConfig, updateConfig } from './config'
+import { readConfig, remoteApprovals, updateConfig } from './config'
 import { PROMPT_MAX, dispatch, knownFolder } from './dispatch'
-import { SHAPE, hooksState, install, previewInstall, previewUninstall, uninstall, type HookPaths } from './hooks'
+import { hookOptions, hooksState, install, previewInstall, previewUninstall, shapeFor, uninstall, type HookPaths } from './hooks'
 import { settingsPath, type HookTarget } from './hooks-install'
 import { isPaused, notifyPrefs, tomorrowMorning, type NotifyPrefs } from './notify'
 import { registerAppScheme, serveRenderer } from './protocol'
@@ -82,7 +83,9 @@ function hookPaths(): HookPaths {
   return { settings: settingsPath(process.env, homedir()), backups: join(app.getPath('userData'), 'backups') }
 }
 
-const target = (): HookTarget | null => (port === null ? null : { port, token: hookToken() })
+const approvalsConfig = (): RemoteApprovals => remoteApprovals(readConfig(configFile()))
+
+const target = (ra = approvalsConfig()): HookTarget | null => (port === null ? null : { port, token: hookToken(), ...hookOptions(ra) })
 
 /**
  * The user OK'd this entry shape, for this settings.json, in the install dialog; launch then reuses that consent
@@ -90,7 +93,7 @@ const target = (): HookTarget | null => (port === null ? null : { port, token: h
  */
 function consented(): boolean {
   const c = readConfig(configFile())
-  return c.hooksConsent === SHAPE && c.hooksConsentPath === hookPaths().settings
+  return c.hooksConsent === shapeFor(remoteApprovals(c)) && c.hooksConsentPath === hookPaths().settings
 }
 
 function prefs(): NotifyPrefs {
@@ -99,7 +102,11 @@ function prefs(): NotifyPrefs {
 
 function refreshStatus(): AppStatus {
   const p = prefs()
-  status = { ...hooksState(hookPaths(), target()), pausedUntil: isPaused(p, Date.now()) ? p.pausedUntil : null }
+  const ra = approvalsConfig()
+  status = { ...hooksState(hookPaths(), target(ra)), pausedUntil: isPaused(p, Date.now()) ? p.pausedUntil : null, remoteApprovals: ra }
+  // ADR-0006: hold only while the entries that wait long enough are in place; otherwise Claude Code cuts in at 2 s.
+  const holding = !demo && ra.enabled && status.hooks === 'installed' && consented()
+  collector?.post({ type: 'approvals', enabled: holding, waitMs: ra.waitSec * 1000 })
   if (win && !win.isDestroyed()) win.webContents.send(IPC.statusPush, status)
   signals.render()
   return status
@@ -126,11 +133,15 @@ function removeHooksForQuit(): void {
 
 const NOT_READY = 'AgentDeck is still starting its collector. Try again in a moment.'
 
-function onInstall(): HooksResult {
-  const t = target()
+/** The install dialog's choice; written to config only together with the entries it shapes. */
+const withApprovals = (on: unknown): RemoteApprovals => ({ ...approvalsConfig(), enabled: z.boolean().parse(on) })
+
+function onInstall(on: unknown): HooksResult {
+  const ra = withApprovals(on)
+  const t = target(ra)
   if (demo || !t) return { ok: false, error: demo ? 'Turn demo data off first.' : NOT_READY }
   const r = install(hookPaths(), t)
-  if (r.ok) updateConfig(configFile(), { hooksConsent: SHAPE, hooksConsentPath: hookPaths().settings, hooksConsentAt: Date.now() })
+  if (r.ok) updateConfig(configFile(), { remoteApprovals: ra, hooksConsent: shapeFor(ra), hooksConsentPath: hookPaths().settings, hooksConsentAt: Date.now() })
   refreshStatus()
   return r
 }
@@ -142,9 +153,19 @@ function onUninstall(): HooksResult {
   return r
 }
 
-function onPreviewInstall(): HooksPreview {
-  const t = target()
+function onPreviewInstall(on: unknown): HooksPreview {
+  const t = target(withApprovals(on))
   return t ? previewInstall(hookPaths(), t) : { ok: false, path: hookPaths().settings, error: NOT_READY }
+}
+
+/** ADR-0006: one click answers one held request. Only our page reaches this, and only through `handle`. */
+async function onDecide(id: unknown, verdict: unknown): Promise<ActionResult> {
+  if (demo) return DEMO_REFUSED
+  const itemId = z.string().min(1).max(64).parse(id)
+  const v = z.enum(['approve', 'reject']).parse(verdict)
+  if (!collector) return { ok: false, error: NOT_READY }
+  const m = await collector.request((reqId) => ({ type: 'decide', reqId, itemId, verdict: v }))
+  return m?.type === 'decided' ? m.result : { ok: false, error: 'AgentDeck did not hear back from its collector. If the terminal asks, answer it there.' }
 }
 
 // ── Notifications ──
@@ -403,9 +424,10 @@ function start(): void {
   handle(IPC.status, (): AppStatus => status ?? refreshStatus())
   handle(IPC.dismiss, (_e, id) => collector?.post({ type: 'dismiss', id: z.string().min(1).max(64).parse(id) }))
   handle(IPC.pause, (_e, choice) => setPause(z.enum(['hour', 'tomorrow']).nullable().parse(choice)))
-  handle(IPC.previewInstall, onPreviewInstall)
+  handle(IPC.decide, (_e, id, verdict) => onDecide(id, verdict))
+  handle(IPC.previewInstall, (_e, on) => onPreviewInstall(on))
   handle(IPC.previewUninstall, () => previewUninstall(hookPaths()))
-  handle(IPC.install, onInstall)
+  handle(IPC.install, (_e, on) => onInstall(on))
   handle(IPC.uninstall, onUninstall)
   handle(IPC.detail, (_e, id) => detail(SessionId.parse(id)))
   handle(IPC.act, async (_e, action, id) => {

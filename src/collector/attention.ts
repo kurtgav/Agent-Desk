@@ -371,6 +371,13 @@ export function dismiss(state: AttentionState, id: string, now: number, cfg: Sta
   }
 }
 
+/** A held approval answered in AgentDeck (ADR-0006): it closes at once, resolved by 'agentdeck'. */
+export function answer(state: AttentionState, id: string, now: number): Attended {
+  const item = state.open.find((i) => i.id === id)
+  if (!item?.held) return { state, opened: [], closed: [] }
+  return { state: { ...state, open: state.open.filter((i) => i !== item) }, opened: [], closed: [{ item, at: now, by: 'agentdeck', state: 'resolved' }] }
+}
+
 /** The 1 s poll runs while a P1 item younger than 2 min is open; 0 = no fast poll. */
 export function fastPollUntil(state: AttentionState): number {
   return state.open.reduce((t, i) => (i.priority === 1 ? Math.max(t, i.openedAt + FAST_POLL_MS) : t), 0)

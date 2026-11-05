@@ -65,17 +65,20 @@ describe('Supervisor request/reply (D-089)', () => {
     s.stop()
   })
 
-  it('answers waiting requests with null when the collector exits, and replays only visibility and focus', async () => {
+  it('answers waiting requests with null when the collector exits, and replays only state (visibility, focus, approvals)', async () => {
     const onDown = vi.fn()
     const s = superviseCollector('collector.js', init, vi.fn(), onDown)
     s.post({ type: 'visible', visible: true })
+    s.post({ type: 'approvals', enabled: true, waitMs: 60_000 })
     s.post({ type: 'dismiss', id: 'a1' })
     const reply = s.request(detail)
+    const decided = s.request((reqId) => ({ type: 'decide', reqId, itemId: 'a1', verdict: 'approve' }))
     procs[0]!.emit('exit', 1)
     await expect(reply).resolves.toBeNull()
+    await expect(decided).resolves.toBeNull() // never replayed: a restarted collector holds nothing
     expect(onDown).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(500)
-    expect(procs[1]!.sent).toEqual([init, { type: 'visible', visible: true }])
+    expect(procs[1]!.sent).toEqual([init, { type: 'visible', visible: true }, { type: 'approvals', enabled: true, waitMs: 60_000 }])
     s.stop()
     await expect(s.request(detail)).resolves.toBeNull()
   })

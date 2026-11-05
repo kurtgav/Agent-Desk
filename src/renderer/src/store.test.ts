@@ -55,7 +55,7 @@ describe('resolve (demo answers stay local)', () => {
 describe('connect (D-059: no collector, no "All quiet")', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  const STATUS: AppStatus = { hooks: 'missing', hooksError: null, conflicts: [], pausedUntil: null }
+  const STATUS: AppStatus = { hooks: 'missing', hooksError: null, conflicts: [], pausedUntil: null, remoteApprovals: { enabled: false, waitSec: 60 } }
 
   function fakeBridge(demo: boolean) {
     let push: (s: Snapshot | null) => void = () => undefined
@@ -71,6 +71,7 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
       onStatus: () => () => undefined,
       onFocusItem: () => () => undefined,
       dismiss: vi.fn(async () => undefined),
+      decide: async () => ({ ok: true }),
       pauseNotifications: async () => undefined,
       previewInstall: async () => ({ ok: false, path: '', error: 'x' }),
       previewUninstall: async () => ({ ok: false, path: '', error: 'x' }),

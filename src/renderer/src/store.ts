@@ -48,8 +48,8 @@ interface UiState {
   setComposerAgent(agent: string | null): void
   focusItem(id: string | null): void
   /**
-   * Live: Dismiss goes to the attention engine; the next snapshot drops the item. Approve/Reject on live items arrive
-   * with held approvals (M4). Demo: answering removes the item locally; nothing is sent anywhere (D-035).
+   * Live: Dismiss goes to the attention engine; the next snapshot drops the item. Live Approve/Reject go through
+   * `answerItem` (lib/act). Demo: answering removes the item locally; nothing is sent anywhere (D-035).
    */
   resolve(itemId: string, outcome: Outcome): void
 }
