@@ -100,7 +100,7 @@ Checked against Bash/PowerShell `tool_input.command`, file-tool `file_path` and 
 | Outside workspace | file tools whose `file_path` is not under the session cwd (case-insensitive, after `path.resolve`) |
 
 ## 6. Unit tests required before M2 and M3 are done
-Reducers are tested against the fixtures in `test/fixtures/hooks/2.1.318` plus synthetic sequences (`src/collector/reduce.test.ts`, `store.test.ts`, `app.test.ts`). M2 covers 1, 2, 3, 4 (interactive and background), 6 and 7; 5, 8 and 9 belong to the attention engine (M3).
+Reducers are tested against the fixtures in `test/fixtures/hooks/2.1.318` plus synthetic sequences (`src/collector/reduce.test.ts`, `store.test.ts`, `app.test.ts`). M2 covers 1, 2, 3, 4 (interactive and background), 6 and 7. M3 covers 5, 8 and 9 in `src/collector/attention.test.ts` (and `store.test.ts` for persistence and the stall tick); `tests/live.spec.ts` times 9 end to end through the real collector and window.
 1. S1 replay gives: 1 session done; Explore subagent nested and finished; 1 task created and completed; files = `hello.txt`; the synthetic `<task-notification>` prompt is not counted as a turn.
 2. S4 sequences: allow (Post with the same id) resolves as approved; deny/empty (`turn.stopped` with no Post) resolves as denied; the inflight set is empty after Stop.
 3. PermissionRequest correlation picks the right PreToolUse when two parallel tool calls have the same `tool_name` and different inputs.
