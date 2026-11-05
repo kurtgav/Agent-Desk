@@ -13,7 +13,7 @@ import { projectName } from '@/lib/selectors'
 import { Avatar } from './Avatar'
 import { Button, IconButton, Inline, StatusPill, cn } from './ui'
 
-const SURFACE: Record<Surface, string> = { cli: 'Terminal', desktop: 'Claude Desktop', vscode: 'VS Code', background: 'Background', sdk: 'SDK' }
+export const SURFACE: Record<Surface, string> = { cli: 'Terminal', desktop: 'Claude Desktop', vscode: 'VS Code', background: 'Background', sdk: 'SDK' }
 
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'ready'; detail: SessionDetail }
 
@@ -60,7 +60,7 @@ function useDetail(id: string | null): Load {
   return { state: 'ready', detail: live ? { ...got.detail, session: live } : got.detail }
 }
 
-const DOT: Record<string, string> = {
+export const DOT: Record<string, string> = {
   'tool.failed': 'var(--failed)',
   'turn.failed': 'var(--failed)',
   'permission.requested': 'var(--needs)',

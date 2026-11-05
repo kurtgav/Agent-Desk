@@ -149,7 +149,9 @@ function AgentPicker(props: {
 export function Composer() {
   const snapshot = useUi((s) => s.snapshot)
   const { effort, composerCwd, composerAgent, cycleEffort, setComposerCwd, setComposerAgent, notify } = useUi()
-  const [text, setText] = useState('')
+  // In the store, so a draft survives a visit to another page.
+  const text = useUi((s) => s.composerText)
+  const setText = useUi((s) => s.setComposerText)
   const [busy, setBusy] = useState(false)
   /** "Run claude there" is starting a terminal; a second click would open a second one. */
   const [opening, setOpening] = useState(false)
@@ -172,7 +174,7 @@ export function Composer() {
     if (!r) return
     if (r.ok) {
       // Keep anything typed while the task was starting.
-      setText((cur) => (cur === sent ? '' : cur))
+      if (useUi.getState().composerText === sent) setText('')
       setUntrusted(null)
       notify(`Started ${r.name} in ${project.name}.`)
     } else if (r.untrusted) setUntrusted({ cwd: project.cwd, error: r.error })

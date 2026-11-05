@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdirSync } from 'node:fs'
 import type { Server } from 'node:http'
 import type { ActionResult, Verdict } from '@shared/bridge'
-import type { SessionDetail } from '@shared/detail'
+import type { History, SessionDetail } from '@shared/detail'
 import type { Snapshot } from '@shared/snapshot'
 import { DEFAULT_STALL, type AttentionRecord, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
@@ -50,6 +50,7 @@ export interface Collector {
   decide(itemId: string, verdict: Verdict): ActionResult
   detail(sessionId: string): SessionDetail | null
   auditLog(limit: number): AuditRow[]
+  activity(limit: number): History['activity']
   close(): Promise<void>
 }
 
@@ -259,6 +260,7 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     },
     detail: (sessionId) => store.detail(sessionId),
     auditLog: (limit) => store.auditLog(limit),
+    activity: (limit) => store.activity(limit),
     close: async () => {
       holds.releaseAll() // empty replies: the terminals ask instead
       await flush()

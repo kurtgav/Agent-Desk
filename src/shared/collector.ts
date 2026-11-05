@@ -1,5 +1,5 @@
 import type { ActionResult, Verdict } from './bridge'
-import type { SessionDetail } from './detail'
+import type { History, SessionDetail } from './detail'
 import type { Snapshot } from './snapshot'
 
 /** Main ↔ collector over the utility process's parentPort (ARCHITECTURE § 2). */
@@ -26,6 +26,7 @@ export type ToCollector =
   /** A request: the reply carries the same `reqId`. Requests are never replayed to a restarted collector. */
   | { type: 'detail'; reqId: number; sessionId: string }
   | { type: 'decide'; reqId: number; itemId: string; verdict: Verdict }
+  | { type: 'history'; reqId: number }
   /** Quit: answer what waits with an empty reply, write its audit rows, then exit (ADR-0006). */
   | { type: 'close' }
 
@@ -33,5 +34,6 @@ export type FromCollector =
   | { type: 'ready'; port: number }
   | { type: 'detail'; reqId: number; detail: SessionDetail | null }
   | { type: 'decided'; reqId: number; result: ActionResult }
+  | { type: 'history'; reqId: number; history: History | null }
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'error'; message: string }

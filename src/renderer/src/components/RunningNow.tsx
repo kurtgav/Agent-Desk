@@ -4,7 +4,7 @@ import { useUi } from '@/store'
 import { duration } from '@/lib/format'
 import { projectName, running } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, pending } from './ui'
+import { Button, Card, CardHeader, Inline } from './ui'
 
 const MAX_ROWS = 4
 
@@ -83,6 +83,7 @@ function Row({ session, now }: { session: Session; now: number }) {
 export function RunningNow({ className }: { className?: string }) {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
+  const go = useUi((s) => s.go)
   const sessions = running(snapshot)
   return (
     <Card aria-labelledby="running-now" className={className}>
@@ -92,11 +93,9 @@ export function RunningNow({ className }: { className?: string }) {
         count={sessions.length}
         countLabel="active"
         action={
-          <Hint label={PENDING_LABEL.M4}>
-            <Button variant="ghost" size="sm" {...pending('M4')}>
-              View all
-            </Button>
-          </Hint>
+          <Button variant="ghost" size="sm" onClick={() => go({ page: 'sessions', active: true })}>
+            View all
+          </Button>
         }
       />
       {sessions.length ? (

@@ -163,9 +163,10 @@ test('later-milestone controls are inert and say when they arrive', async () => 
   const { page, errors } = await open(1440, 924)
   const before = await observable(page)
 
-  // Every pending control on Home, activated by mouse and by keyboard, changes nothing.
+  // M4 left nothing pending; what remains (M5) is inert: activated by mouse and by keyboard, it changes nothing.
+  await expect(page.locator('[data-pending="M4"]')).toHaveCount(0)
   const controls = await page.locator('[data-pending]').all()
-  expect(controls.length).toBeGreaterThan(10)
+  expect(controls.length).toBeGreaterThan(0)
   for (const el of controls) {
     await expect(el).toHaveAttribute('aria-disabled', 'true')
     await el.click({ force: true }) // aria-disabled, so Playwright would refuse a normal click
@@ -174,10 +175,11 @@ test('later-milestone controls are inert and say when they arrive', async () => 
     expect(await observable(page)).toEqual(before)
   }
 
-  // Keyboard focus shows the explanation too (the loop above leaves focus on another control).
+  // Keyboard focus shows the explanation too.
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: /Search sessions/ }).focus()
-  await expect(page.getByRole('tooltip')).toHaveText('Search: Arrives with lists and actions (M4)')
+  await page.locator('#composer-input').focus()
+  await page.getByRole('button', { name: 'Settings', exact: true }).focus()
+  await expect(page.getByRole('tooltip')).toHaveText('Settings: Arrives with settings and diagnostics (M5)')
 
   // Pending menu rows are reachable by keyboard, explain themselves, and keep the menu as it was.
   await page.getByRole('button', { name: 'More', exact: true }).click()
@@ -207,6 +209,93 @@ test('Home has no axe violations (WCAG 2.x A/AA)', async () => {
   // Legacy mode: the default mode opens a helper page, which Electron's CDP target doesn't support.
   const results = await new AxeBuilder({ page }).setLegacyMode(true).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
+  expect(errors).toEqual([])
+})
+
+const axe = async (page: Page): Promise<string[]> =>
+  (await new AxeBuilder({ page }).setLegacyMode(true).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()).violations.map(
+    (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`
+  )
+
+test('the sidebar opens every list page, each passes axe, and the breadcrumb and g-keys find the way back', async () => {
+  const { page, errors } = await open(1440, 924)
+  const nav = page.getByRole('navigation', { name: 'Main' })
+  const title = page.getByRole('heading', { level: 1 })
+  const crumb = page.getByRole('navigation', { name: 'Breadcrumb' })
+
+  await nav.getByRole('button', { name: 'Sessions' }).click()
+  await expect(title).toHaveText('Sessions')
+  await expect(crumb.locator('[aria-current=page]')).toHaveText('Sessions')
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(8)
+  await page.getByRole('group', { name: 'Status' }).getByRole('button', { name: 'Failed' }).click()
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(1)
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: /^Approvals/ }).click()
+  await expect(page.getByRole('region', { name: 'Waiting for your OK' }).getByRole('listitem')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Audit log' })).toContainText('Approved once')
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Files' }).click()
+  await expect(title).toHaveText('Files')
+  expect(await page.locator('main section').count()).toBeGreaterThan(1) // one card per project
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Activity' }).click()
+  await expect(page.getByRole('region', { name: 'Events' }).getByRole('listitem').first()).toBeVisible()
+  expect(await axe(page)).toEqual([])
+
+  await page.getByRole('button', { name: /^All agents/ }).click()
+  await expect(title).toHaveText('Agents')
+  await expect(page.getByRole('region', { name: 'Subagents' }).getByRole('listitem')).toHaveCount(4)
+  expect(await axe(page)).toEqual([])
+
+  await crumb.getByRole('button', { name: 'Home' }).click()
+  await expect(title).toHaveText(/^Good (morning|afternoon|evening), Kurt$/)
+  await page.locator('body').press('g')
+  await page.locator('body').press('a')
+  await expect(title).toHaveText('Approvals')
+  await page.locator('body').press('g')
+  await page.locator('body').press('h')
+  await expect(title).toHaveText(/^Good/)
+  expect(errors).toEqual([])
+})
+
+test('avatar stack and View all open active sessions; Ctrl+K finds a session and opens its drawer', async () => {
+  const { page, errors } = await open(1440, 924)
+  const pressed = page.getByRole('group', { name: 'Status' }).locator('[aria-pressed=true]')
+
+  await page.getByRole('banner').getByRole('button', { name: /active sessions$/ }).click()
+  await expect(pressed).toHaveText('Active')
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(5)
+
+  await page.keyboard.press('Control+K')
+  const palette = page.getByRole('dialog', { name: 'Search AgentDeck' })
+  await expect(palette).toBeVisible()
+  expect(await axe(page)).toEqual([])
+  await palette.getByRole('combobox').fill('stripe')
+  await expect(palette.getByRole('option', { selected: true })).toContainText('stripe-webhooks')
+  await page.keyboard.press('Enter')
+  await expect(palette).toBeHidden()
+  await expect(page.getByRole('dialog', { name: /stripe-webhooks/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // Closed with Ctrl+K it forgets what was typed; either way, focus goes back to what opened it.
+  const searchButton = page.getByRole('button', { name: 'Search', exact: true })
+  await searchButton.click()
+  await page.getByRole('combobox').fill('stripe')
+  await page.keyboard.press('Control+K')
+  await expect(palette).toBeHidden()
+  await expect(searchButton).toBeFocused()
+  await page.keyboard.press('Control+K')
+  await expect(page.getByRole('combobox')).toHaveValue('')
+  await page.keyboard.press('Escape')
+  await expect(searchButton).toBeFocused()
+
+  await page.keyboard.press('Control+K')
+  await page.getByRole('combobox').fill('new task')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#composer-input')).toBeFocused()
   expect(errors).toEqual([])
 })
 

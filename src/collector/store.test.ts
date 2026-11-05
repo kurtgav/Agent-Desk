@@ -290,4 +290,17 @@ describe('Store.detail (UI_MAP § Session drawer)', () => {
   it('is null for a session it never saw', () => {
     expect(open(':memory:', t0).detail('nope')).toBeNull()
   })
+
+  it('serves activity across sessions, newest first, capped', () => {
+    const store = open(':memory:', t0)
+    store.ingest([
+      hook('UserPromptSubmit', t0, { prompt: 'go' }),
+      normalizeHook(JSON.stringify({ session_id: 'e', hook_event_name: 'UserPromptSubmit', cwd: 'D:\\q', prompt: 'hi' }), t0 + 10)!,
+      hook('Stop', t0 + 20, { stop_hook_active: false, last_assistant_message: 'Done.' })
+    ])
+    expect(store.activity(10).map((e) => [e.sessionId, e.kind])).toEqual([
+      ['d', 'turn.stopped'], ['e', 'session.prompt'], ['d', 'session.prompt']
+    ])
+    expect(store.activity(1)).toHaveLength(1)
+  })
 })

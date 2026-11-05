@@ -225,22 +225,23 @@ function useRevealedItem(setExpanded: (v: boolean) => void): { flash: string | n
   return { flash, rows }
 }
 
-export function NeedsYou() {
+/** Home: every open item, three shown. The Approvals page (`approvals`): only P1 items, all of them. */
+export function NeedsYou({ approvals = false }: { approvals?: boolean }) {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(approvals)
   const { flash, rows } = useRevealedItem(setExpanded)
-  const items = byPriority(snapshot.attention)
+  const items = byPriority(snapshot.attention).filter((i) => !approvals || i.priority === 1)
   const sessions = sessionIndex(snapshot)
   const shown = expanded ? items : items.slice(0, MAX_ROWS)
-  const more = items.length - Math.min(items.length, MAX_ROWS)
+  const more = approvals ? 0 : items.length - Math.min(items.length, MAX_ROWS)
   const elsewhere = waitingWithoutItem(snapshot)
 
   return (
     <Card aria-labelledby="needs-you">
       <CardHeader
         id="needs-you"
-        title="Needs you"
+        title={approvals ? 'Waiting for your OK' : 'Needs you'}
         count={items.length + elsewhere.length}
         countLabel="open"
         action={
@@ -252,7 +253,7 @@ export function NeedsYou() {
         }
       />
       {shown.length ? (
-        <ul id="needs-you-list" className={cn(expanded && 'max-h-[420px] overflow-y-auto')}>
+        <ul id="needs-you-list" className={cn(expanded && !approvals && 'max-h-[420px] overflow-y-auto')}>
           {shown.map((i) => (
             <Row
               key={i.id}
@@ -274,7 +275,7 @@ export function NeedsYou() {
           <span className="text-muted">Answer it where it runs.</span>
         </p>
       ) : (
-        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">Nothing needs you right now.</p>
+        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">{approvals ? 'Nothing waits for your OK right now.' : 'Nothing needs you right now.'}</p>
       )}
     </Card>
   )

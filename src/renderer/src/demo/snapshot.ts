@@ -1,4 +1,4 @@
-import type { SessionDetail } from '@shared/detail'
+import type { AuditRow, History, SessionDetail } from '@shared/detail'
 import type { ChangedFile, Session, Snapshot } from '@shared/snapshot'
 
 /**
@@ -146,4 +146,20 @@ export function demoDetail(session: Session, snapshot: Snapshot): SessionDetail 
   const plan = session.plan
   const tasks = plan ? Array.from({ length: plan.total }, (_, i) => ({ id: `${session.id}-t${i}`, subject: `Step ${i + 1}`, done: i < plan.done })) : []
   return { session, timeline, tasks, files: snapshot.files.filter((f) => f.sessionId === session.id), finalMessage: null }
+}
+
+/** Activity and the audit log for demo mode: every demo session's timeline, and two sample settled approvals. */
+export function demoHistory(snapshot: Snapshot): History {
+  const activity = snapshot.sessions
+    .flatMap((s) => demoDetail(s, snapshot).timeline.map((e) => ({ ...e, sessionId: s.id })))
+    .sort((a, b) => b.ts - a.ts)
+  const at = snapshot.generatedAt
+  const row = (sessionId: string, title: string, outcome: AuditRow['outcome'], minutes: number, waitSec: number): AuditRow => ({
+    ts: Math.round(at - minutes * MIN), requestedAt: Math.round(at - minutes * MIN - waitSec * 1000), itemId: `${sessionId}-${minutes}`,
+    sessionId, agentId: null, toolName: 'Bash', title, riskFlags: [], inputHash: 'demo', outcome
+  })
+  return {
+    activity,
+    audit: [row('s-auth', 'Run `npm test -- auth`', 'approved', 14, 6), row('s-seo', 'Run `npx lighthouse https://example.com/pricing`', 'timed-out', 190, 60)]
+  }
 }

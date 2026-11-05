@@ -10,7 +10,7 @@ import {
   type RemoteApprovals
 } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
-import type { SessionDetail } from '@shared/detail'
+import type { History, SessionDetail } from '@shared/detail'
 import type { Session, Snapshot } from '@shared/snapshot'
 import { resolveClaude } from '../collector/cli'
 import { act, LOCAL_PATH, logs, openFile, runClaudeIn, type ActionDeps } from './actions'
@@ -220,6 +220,12 @@ async function detail(sessionId: string): Promise<SessionDetail | null> {
   if (demo || !collector) return null
   const m = await collector.request((reqId) => ({ type: 'detail', reqId, sessionId }))
   return m?.type === 'detail' ? m.detail : null
+}
+
+async function history(): Promise<History | null> {
+  if (demo || !collector) return null
+  const m = await collector.request((reqId) => ({ type: 'history', reqId }))
+  return m?.type === 'history' ? m.history : null
 }
 
 /** The session as the collector knows it: cwd and ids never come from the renderer. */
@@ -432,6 +438,7 @@ function start(): void {
   handle(IPC.install, (_e, on) => onInstall(on))
   handle(IPC.uninstall, onUninstall)
   handle(IPC.detail, (_e, id) => detail(SessionId.parse(id)))
+  handle(IPC.history, () => history())
   handle(IPC.act, async (_e, action, id) => {
     const s = await sessionFor(SessionId.parse(id))
     return s ? act(z.enum(['attach', 'stop', 'open-folder', 'open-desktop', 'copy-resume']).parse(action), s, actionDeps) : UNKNOWN

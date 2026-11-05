@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { PlanTask, SessionDetail } from '@shared/detail'
+import type { History, PlanTask, SessionDetail } from '@shared/detail'
 import { pathKey } from '@shared/paths'
-import type { ChangedFile, Snapshot } from '@shared/snapshot'
+import { SNAPSHOT_FILES_MAX, SNAPSHOT_SESSIONS_MAX, type ChangedFile, type Snapshot } from '@shared/snapshot'
 import {
   answer, attend, dismiss, emptyAttention, fastPollUntil, stall, toItem, type AttentionRecord, type AttentionState, type Attended, type StallConfig
 } from './attention'
@@ -73,9 +73,6 @@ export const RETENTION_MS = 30 * DAY_MS
  * has no per-request field, so asking twice for the same command sends the same bytes.
  */
 export const DEDUPE_MS = 2_000
-/** Sessions the snapshot shows: every live one, plus ended ones seen this week, newest first. */
-const MAX_SESSIONS = 50
-const MAX_FILES = 200
 const MAX_AGENT_TYPES = 5
 /** The drawer (UI_MAP § Session drawer): newest events and files of one session. */
 const TIMELINE_MAX = 200
@@ -386,7 +383,7 @@ export class Store {
     const sessions = [...this.sessions.values()]
       .filter((s) => !s.ended || s.lastEventAt >= week)
       .sort((a, b) => b.lastEventAt - a.lastEventAt)
-      .slice(0, MAX_SESSIONS)
+      .slice(0, SNAPSHOT_SESSIONS_MAX)
 
     const open = [...this.sessions.values()].filter((s) => s.status === 'working' && s.workingSince !== null)
     const agentTime = (from: number, to: number): number =>
@@ -403,7 +400,7 @@ export class Store {
       awayUntil: extras.awayUntil,
       sessions: sessions.map(toSession),
       attention: this.attention.open.map(toItem),
-      files: [...latest.values()].sort((a, b) => b.changedAt - a.changedAt).slice(0, MAX_FILES),
+      files: [...latest.values()].sort((a, b) => b.changedAt - a.changedAt).slice(0, SNAPSHOT_FILES_MAX),
       week: {
         agentTimeMs: Math.round(agentTime(week, now)),
         agentTimeLastWeekMs: Math.round(agentTime(lastWeek, week)),
@@ -416,6 +413,17 @@ export class Store {
         .map(([t]) => t),
       agentDefinitionCount: extras.agentDefinitionCount
     }
+  }
+
+  /** The Activity page: the newest events across every session (30 days), newest first. */
+  activity(limit: number): History['activity'] {
+    return this.db
+      .prepare('SELECT id, ts, kind, agent_type, summary, session_id FROM events ORDER BY ts DESC, seq DESC LIMIT ?')
+      .all(limit)
+      .map((r) => ({
+        id: String(r.id), ts: Number(r.ts), kind: String(r.kind), agentType: r.agent_type === null ? null : String(r.agent_type),
+        summary: String(r.summary), sessionId: String(r.session_id)
+      }))
   }
 
   /** One session for the drawer, from the database (30 days), or null when it is unknown. */

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentDeckBridge, AppStatus } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
-import { demoSnapshot } from './demo/snapshot'
-import { connect, useUi } from './store'
+import { demoHistory, demoSnapshot } from './demo/snapshot'
+import { commands, search } from './components/Palette'
+import { HOME, connect, useUi } from './store'
 
 const NOW = Date.UTC(2026, 10, 5, 14, 0)
 const session = (id: string) => useUi.getState().snapshot.sessions.find((s) => s.id === id)!
@@ -10,6 +11,40 @@ const hasItem = (id: string) => useUi.getState().snapshot.attention.some((a) => 
 
 beforeEach(() => {
   useUi.setState({ snapshot: demoSnapshot(NOW), announcement: '' })
+})
+
+describe('command palette search (UI_MAP § Top bar)', () => {
+  it('with nothing typed: pages, actions, and the five newest sessions', () => {
+    const shown = search(commands(), '')
+    expect(shown.filter((c) => c.group === 'Go to').map((c) => c.label)).toEqual(['Home', 'Sessions', 'Approvals', 'Files', 'Activity', 'Agents'])
+    expect(shown.filter((c) => c.group === 'Sessions')).toHaveLength(5)
+    expect(shown.some((c) => c.group === 'Files' || c.group === 'Projects')).toBe(false)
+  })
+
+  it('matches labels and paths across groups, case-insensitively', () => {
+    const shown = search(commands(), 'BILLING')
+    expect(shown.map((c) => c.group)).toEqual(expect.arrayContaining(['Projects', 'Files']))
+    expect(shown.every((c) => `${c.label} ${c.meta ?? ''}`.toLowerCase().includes('billing'))).toBe(true)
+  })
+
+  it('caps each group at eight', () => {
+    expect(search(commands(), 'a').filter((c) => c.group === 'Files').length).toBeLessThanOrEqual(8)
+  })
+
+  it('a project result opens Sessions filtered to it', () => {
+    search(commands(), 'billing').find((c) => c.group === 'Projects')!.run()
+    expect(useUi.getState().nav).toMatchObject({ page: 'sessions', project: expect.stringMatching(/billing/i) })
+    useUi.setState({ nav: HOME })
+  })
+})
+
+describe('demoHistory', () => {
+  it('lists every demo session timeline newest first, and two sample audit rows', () => {
+    const h = demoHistory(demoSnapshot(NOW))
+    expect(h.activity.map((e) => e.ts)).toEqual([...h.activity.map((e) => e.ts)].sort((a, b) => b - a))
+    expect(new Set(h.activity.map((e) => e.sessionId)).size).toBe(demoSnapshot(NOW).sessions.length)
+    expect(h.audit.map((r) => r.outcome)).toEqual(['approved', 'timed-out'])
+  })
 })
 
 describe('resolve (demo answers stay local)', () => {
@@ -84,7 +119,8 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
       dispatch: async () => ({ ok: true, name: 'task-0000', bgId: null }),
       chooseFolder: async () => null,
       runClaudeIn: async () => ({ ok: true }),
-      listAgents: async () => []
+      listAgents: async () => [],
+      getHistory: async () => null
     }
     vi.stubGlobal('window', { agentdeck: bridge })
     return Object.assign((s: Snapshot | null) => push(s), { bridge })

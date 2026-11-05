@@ -1,4 +1,4 @@
-import type { SessionDetail } from './detail'
+import type { History, SessionDetail } from './detail'
 import type { Snapshot } from './snapshot'
 
 /** What the preload exposes on `window.agentdeck` (ADR-0010: no Node in the renderer). */
@@ -106,6 +106,8 @@ export interface AgentDeckBridge {
   decide(itemId: string, verdict: Verdict): Promise<ActionResult>
   /** The drawer's data, or null when the collector doesn't know the session (or isn't running). */
   getDetail(sessionId: string): Promise<SessionDetail | null>
+  /** Activity and the approvals audit log, or null when the collector isn't running (and always in demo). */
+  getHistory(): Promise<History | null>
   /** Stop is only sent after the user confirmed it in the window. */
   act(action: SessionAction, sessionId: string): Promise<ActionResult>
   /** `claude logs <id>` of a background session, ANSI codes removed. */
@@ -138,6 +140,7 @@ export const IPC = {
   install: 'hooks:install',
   uninstall: 'hooks:uninstall',
   detail: 'session:detail',
+  history: 'history:get',
   act: 'session:act',
   logs: 'session:logs',
   openFile: 'file:open',

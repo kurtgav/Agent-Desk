@@ -1,6 +1,7 @@
 // Utility-process entry (ADR-0002). Talks to main over parentPort only; everything else lives in app.ts.
 import type {} from 'electron' // types process.parentPort
 import type { FromCollector, ToCollector } from '@shared/collector'
+import { HISTORY_MAX } from '@shared/detail'
 import { startCollector, type Collector } from './app'
 
 const SNAPSHOT_THROTTLE_MS = 100
@@ -71,5 +72,13 @@ parent.on('message', (e: { data: ToCollector }) => {
       report(err) // the drawer shows "could not load"; main never waits forever
     }
     post({ type: 'detail', reqId: m.reqId, detail })
+  } else if (m.type === 'history') {
+    let history = null
+    try {
+      history = collector ? { activity: collector.activity(HISTORY_MAX), audit: collector.auditLog(HISTORY_MAX) } : null
+    } catch (err) {
+      report(err)
+    }
+    post({ type: 'history', reqId: m.reqId, history })
   }
 })

@@ -1,5 +1,6 @@
 // ADR-0006 remote approvals: PermissionRequest hooks AgentDeck holds open until the user answers or the wait runs out.
 import type { Verdict } from '@shared/bridge'
+import type { AuditRow, HoldOutcome } from '@shared/detail'
 import { TITLE_MAX } from './attention'
 
 /** hooks § PermissionRequest decision control; spike S4. Approve-once: no `updatedPermissions`, so no rule is ever added. */
@@ -31,30 +32,10 @@ export function faithfulPreview(toolName: string | null, rawInput: unknown, show
   return typeof v === 'string' && v.trim() !== '' && v.length <= TITLE_MAX && !v.includes('`') && value(shownInput) === v
 }
 
-/**
- * How a hold ended. Only the first two send a decision; every other one replies empty, so Claude Code shows its own prompt.
- * `abandoned`: Claude Code closed the connection first (its hook timeout, or the session went away).
- * `released`: the item closed some other way, or the collector is shutting down.
- */
-export type HoldOutcome = 'approved' | 'rejected' | 'timed-out' | 'abandoned' | 'released'
+export type { AuditRow, HoldOutcome }
 
-/** What the audit log keeps about a held request: the redacted preview the user saw, never the raw input. */
-export interface HoldInfo {
-  itemId: string
-  sessionId: string
-  agentId: string | null
-  toolName: string | null
-  title: string
-  riskFlags: string[]
-  /** SHA-256 of the raw `tool_input` Claude Code sent, so the log can prove what was answered. */
-  inputHash: string
-  requestedAt: number
-}
-
-export interface AuditRow extends HoldInfo {
-  ts: number
-  outcome: HoldOutcome
-}
+/** What the audit log keeps about a held request until it settles. */
+export type HoldInfo = Omit<AuditRow, 'ts' | 'outcome'>
 
 /** `gone`: it no longer waits here. `unlogged`: its audit row could not be written, so no decision went out. */
 export type DecideResult = 'sent' | 'gone' | 'unlogged'

@@ -1,18 +1,21 @@
 import type { ComponentType, ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { Activity, Check, ChevronDown, Files, FolderClosed, Gauge, House, LayoutList, PanelLeft, Plus, Search, Settings, ShieldCheck } from 'lucide-react'
-import { useUi } from '@/store'
+import { HOME, useUi, type Page } from '@/store'
 import { needsOkCount, recentProjects } from '@/lib/selectors'
 import { tokens, usd } from '@/lib/format'
 import { Avatar, Mark } from './Avatar'
-import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, cn, pending, type Milestone } from './ui'
+import { PAGE_TITLE } from './pages/Page'
+import { Button, Hint, IconButton, PENDING_LABEL, PendingMenuItem, cn, pending } from './ui'
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 
 export const USER_NAME = 'Kurt' // D-014; editable in Settings (M5)
 
-function focusComposer(): void {
-  document.getElementById('composer-input')?.focus()
+/** The composer lives on Home; from another page, go there first. */
+export function focusComposer(): void {
+  useUi.getState().go(HOME)
+  requestAnimationFrame(() => document.getElementById('composer-input')?.focus())
 }
 
 const TOGGLE_ID = 'sidebar-toggle'
@@ -23,13 +26,13 @@ function toggleAndKeepFocus(toggle: () => void): void {
   requestAnimationFrame(() => document.getElementById(TOGGLE_ID)?.focus())
 }
 
-function NavItem({ icon: I, label, current, badge, m, collapsed }: { icon: Icon; label: string; current?: boolean; badge?: number; m?: Milestone; collapsed: boolean }) {
+function NavItem({ icon: I, label, current, badge, collapsed, onClick }: { icon: Icon; label: string; current?: boolean; badge?: number; collapsed: boolean; onClick(): void }) {
   const button = (
     <button
       type="button"
       aria-current={current ? 'page' : undefined}
       aria-label={collapsed ? label : undefined}
-      {...(m ? pending(m) : {})}
+      onClick={onClick}
       className={cn(
         'flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-[14px] transition-colors duration-150',
         current ? 'bg-active font-medium' : 'hover:bg-active/60',
@@ -46,8 +49,7 @@ function NavItem({ icon: I, label, current, badge, m, collapsed }: { icon: Icon;
       ) : null}
     </button>
   )
-  const hint = m ? PENDING_LABEL[m] : collapsed ? label : null
-  return <li>{hint ? <Hint side="right" label={collapsed && m ? `${label}: ${PENDING_LABEL[m]}` : hint}>{button}</Hint> : button}</li>
+  return <li>{collapsed ? <Hint side="right" label={label}>{button}</Hint> : button}</li>
 }
 
 function Group({ title, collapsed, children }: { title: string; collapsed: boolean; children: ReactNode }) {
@@ -153,7 +155,13 @@ export function Sidebar() {
   const toggle = useUi((s) => s.toggleSidebar)
   const snapshot = useUi((s) => s.snapshot)
   const version = useUi((s) => s.version)
+  const nav = useUi((s) => s.nav)
+  const go = useUi((s) => s.go)
+  const openPalette = useUi((s) => s.setPalette)
   const projects = recentProjects(snapshot, 5)
+  const page = (p: Page, icon: Icon, badge?: number) => (
+    <NavItem icon={icon} label={PAGE_TITLE[p]} badge={badge} current={nav.page === p && !nav.project} collapsed={collapsed} onClick={() => go({ page: p })} />
+  )
 
   return (
     <aside id="sidebar" aria-label="Sidebar" className={cn('flex h-full flex-none flex-col bg-ground', collapsed ? 'w-16' : 'w-[216px]')}>
@@ -195,8 +203,8 @@ export function Sidebar() {
             New task
           </Button>
         )}
-        <Hint side={collapsed ? 'right' : 'bottom'} label={`Search: ${PENDING_LABEL.M4}`}>
-          <IconButton aria-label="Search" className="border border-control bg-surface" {...pending('M4')}>
+        <Hint side={collapsed ? 'right' : 'bottom'} label="Search (Ctrl K)">
+          <IconButton aria-label="Search" aria-keyshortcuts="Control+K" className="border border-control bg-surface" onClick={() => openPalette(true)}>
             <Search size={15} strokeWidth={1.75} />
           </IconButton>
         </Hint>
@@ -205,36 +213,49 @@ export function Sidebar() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
         <nav aria-label="Main" className="mt-3">
           <ul className="flex flex-col gap-0.5">
-            <NavItem icon={House} label="Home" current collapsed={collapsed} />
-            <NavItem icon={LayoutList} label="Sessions" m="M4" collapsed={collapsed} />
-            <NavItem icon={ShieldCheck} label="Approvals" badge={needsOkCount(snapshot)} m="M4" collapsed={collapsed} />
-            <NavItem icon={Files} label="Files" m="M4" collapsed={collapsed} />
-            <NavItem icon={Activity} label="Activity" m="M4" collapsed={collapsed} />
+            {page('home', House)}
+            {page('sessions', LayoutList)}
+            {page('approvals', ShieldCheck, needsOkCount(snapshot))}
+            {page('files', Files)}
+            {page('activity', Activity)}
           </ul>
         </nav>
         <Group title="Recent" collapsed={collapsed}>
           {projects.map((p) => (
-            <NavItem key={p.cwd} icon={FolderClosed} label={p.name} m="M4" collapsed={collapsed} />
+            <NavItem
+              key={p.cwd}
+              icon={FolderClosed}
+              label={p.name}
+              current={nav.page === 'sessions' && nav.project === p.cwd}
+              collapsed={collapsed}
+              onClick={() => go({ page: 'sessions', project: p.cwd })}
+            />
           ))}
         </Group>
         <Group title="Agents" collapsed={collapsed}>
           {snapshot.recentAgentTypes.map((a) => (
             <li key={a}>
-              <Hint side="right" label={PENDING_LABEL.M4}>
-                <button type="button" {...pending('M4')} className="flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-[14px] hover:bg-active/60">
-                  <Avatar seed={a} size={16} />
-                  <span className="truncate">{a}</span>
-                </button>
-              </Hint>
+              <button
+                type="button"
+                aria-current={nav.page === 'agents' && nav.query === a ? 'page' : undefined}
+                onClick={() => go({ page: 'agents', query: a })}
+                className="flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-[14px] transition-colors duration-150 hover:bg-active/60 aria-[current=page]:bg-active aria-[current=page]:font-medium"
+              >
+                <Avatar seed={a} size={16} />
+                <span className="truncate">{a}</span>
+              </button>
             </li>
           ))}
           <li>
-            <Hint side="right" label={PENDING_LABEL.M4}>
-              <button type="button" {...pending('M4')} className="flex h-[30px] w-full items-center rounded-lg px-2 text-[14px] text-muted hover:bg-active/60">
-                All agents
-                <span className="ml-auto text-[12px] tabular-nums">{snapshot.agentDefinitionCount}</span>
-              </button>
-            </Hint>
+            <button
+              type="button"
+              aria-current={nav.page === 'agents' && !nav.query ? 'page' : undefined}
+              onClick={() => go({ page: 'agents' })}
+              className="flex h-[30px] w-full items-center rounded-lg px-2 text-[14px] text-muted transition-colors duration-150 hover:bg-active/60 aria-[current=page]:bg-active aria-[current=page]:font-medium aria-[current=page]:text-ink"
+            >
+              All agents
+              <span className="ml-auto text-[12px] tabular-nums">{snapshot.agentDefinitionCount}</span>
+            </button>
           </li>
         </Group>
       </div>

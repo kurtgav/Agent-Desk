@@ -25,6 +25,7 @@ const bridge: AgentDeckBridge = {
   installHooks: (remoteApprovals) => ipcRenderer.invoke(IPC.install, remoteApprovals),
   uninstallHooks: () => ipcRenderer.invoke(IPC.uninstall),
   getDetail: (sessionId) => ipcRenderer.invoke(IPC.detail, sessionId),
+  getHistory: () => ipcRenderer.invoke(IPC.history),
   act: (action, sessionId) => ipcRenderer.invoke(IPC.act, action, sessionId),
   logs: (sessionId) => ipcRenderer.invoke(IPC.logs, sessionId),
   openFile: (path) => ipcRenderer.invoke(IPC.openFile, path),

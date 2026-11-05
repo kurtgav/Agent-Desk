@@ -1,7 +1,7 @@
 import { useUi } from '@/store'
 import { projectName, recentSessions } from '@/lib/selectors'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, PENDING_LABEL, StatusPill, cn, pending } from './ui'
+import { Button, Card, CardHeader, StatusPill, cn } from './ui'
 
 const MAX_TILES = 6
 
@@ -17,11 +17,9 @@ export function YourAgents({ className }: { className?: string }) {
         count={snapshot.sessions.length}
         countLabel="sessions"
         action={
-          <Hint label={PENDING_LABEL.M4}>
-            <Button variant="ghost" size="sm" {...pending('M4')}>
-              See all
-            </Button>
-          </Hint>
+          <Button variant="ghost" size="sm" onClick={() => useUi.getState().go({ page: 'sessions' })}>
+            See all
+          </Button>
         }
       />
       {sessions.length ? (
