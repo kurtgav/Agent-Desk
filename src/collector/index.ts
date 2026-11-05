@@ -1,0 +1,55 @@
+// Utility-process entry (ADR-0002). Talks to main over parentPort only; everything else lives in app.ts.
+import type {} from 'electron' // types process.parentPort
+import type { FromCollector, ToCollector } from '@shared/collector'
+import { startCollector, type Collector } from './app'
+
+const SNAPSHOT_THROTTLE_MS = 100
+/** Agent time and ages move with the clock even when no event arrives. */
+const HEARTBEAT_MS = 30_000
+
+const parent = process.parentPort
+const post = (m: FromCollector): void => parent.postMessage(m)
+
+let collector: Collector | null = null
+let timer: NodeJS.Timeout | null = null
+// Window state can arrive while the collector is still binding its port; apply it once it exists.
+let visible = true
+let away: { focused: boolean; at: number } | null = null
+
+function push(): void {
+  timer = null
+  if (collector) post({ type: 'snapshot', snapshot: collector.snapshot() })
+}
+
+/** At most one snapshot per 100 ms, so a burst of hook events costs one render. */
+function changed(): void {
+  timer ??= setTimeout(push, SNAPSHOT_THROTTLE_MS)
+}
+
+const report = (err: unknown): void => post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
+
+parent.on('message', (e: { data: ToCollector }) => {
+  const m = e.data
+  if (m.type === 'init') {
+    if (collector) return
+    startCollector({ ...m, onChange: changed, onError: report })
+      .then((c) => {
+        collector = c
+        c.setVisible(visible)
+        if (away) c.setFocused(away.focused, away.at)
+        post({ type: 'ready', port: c.port })
+        push()
+        setInterval(push, HEARTBEAT_MS)
+      })
+      .catch((err: unknown) => {
+        report(err)
+        process.exit(1) // main restarts us with backoff
+      })
+  } else if (m.type === 'visible') {
+    visible = m.visible
+    collector?.setVisible(m.visible)
+  } else if (m.type === 'focus') {
+    away = m
+    collector?.setFocused(m.focused, m.at)
+  }
+})
