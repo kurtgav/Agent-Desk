@@ -116,6 +116,8 @@ test('a Running now row opens the session drawer; demo actions run nothing; Esc 
 
   await page.keyboard.press('Escape')
   await expect(drawer).toHaveCount(0)
+  // Focus goes back to the row that opened it, not to the top of the page.
+  await expect(first).toBeFocused()
   expect(errors).toEqual([])
 })
 

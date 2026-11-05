@@ -53,11 +53,22 @@ export function weekDelta(current: number, previous: number): string {
   return `${duration(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'} than last week`
 }
 
+/** A timeline renders up to 200 rows; building three formatters per row each render adds up. */
+const clockFormats = new Map<string, { day: Intl.DateTimeFormat; time: Intl.DateTimeFormat; date: Intl.DateTimeFormat }>()
+
 /** Clock time for timelines: "14:02:07" today, "Nov 3, 14:02" before. */
 export function clock(ts: number, now: number, locale?: string, timeZone?: string): string {
-  const day = (t: number): string => new Intl.DateTimeFormat('en-CA', { timeZone }).format(t)
-  if (day(ts) === day(now)) return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone }).format(ts)
-  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(ts)
+  const key = `${locale ?? ''}|${timeZone ?? ''}`
+  let f = clockFormats.get(key)
+  if (!f) {
+    f = {
+      day: new Intl.DateTimeFormat('en-CA', { timeZone }),
+      time: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone }),
+      date: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone })
+    }
+    clockFormats.set(key, f)
+  }
+  return (f.day.format(ts) === f.day.format(now) ? f.time : f.date).format(ts)
 }
 
 export function usd(n: number): string {

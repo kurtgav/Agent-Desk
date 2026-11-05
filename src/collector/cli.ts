@@ -1,10 +1,12 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, lstatSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import spawn from 'cross-spawn'
 
 const VERSION_RE = /^\d+\.\d+\.\d+ \(Claude Code\)/
 const VERSION_TIMEOUT_MS = 5_000
 const MAX_OUTPUT = 8 * 1024 * 1024
+/** A launch that fails does so at once (unknown id, missing file); one still running after this counts as started. */
+const EARLY_EXIT_MS = 2_000
 
 export interface RunResult {
   code: number | null
@@ -74,19 +76,35 @@ export function run(
 }
 
 /**
- * Starts a program that outlives AgentDeck in its own window (Attach, a terminal, VS Code), argument array, no shell
- * (ADR-0008). Resolves once Windows started it, or with the reason it could not.
+ * Starts a program that outlives AgentDeck (Windows Terminal, VS Code, Claude Desktop), argument array, no shell
+ * (ADR-0008). Resolves with null once it started and did not fail within `watchMs`, or with the reason it failed.
+ * Not `detached`: on Windows that is DETACHED_PROCESS, and a console program without a console does nothing (D-095).
+ * A Windows child outlives its parent anyway.
  */
-export function launch(file: string, args: readonly string[], opts: { cwd?: string; hide: boolean; env?: NodeJS.ProcessEnv }): Promise<string | null> {
-  // cross-spawn runs a path it can't resolve through cmd.exe, which starts fine and fails later, after we let go.
-  if (!existsSync(file)) return Promise.resolve(`${file} was not found`)
+export function launch(
+  file: string,
+  args: readonly string[],
+  opts: { cwd?: string; hide: boolean; env?: NodeJS.ProcessEnv; watchMs?: number }
+): Promise<string | null> {
+  // cross-spawn runs a path it can't resolve through cmd.exe, which starts fine and fails later.
+  // lstat, not exists: Windows Terminal's wt.exe is an app execution alias, a reparse point stat may not follow.
+  if (!lstatSync(file, { throwIfNoEntry: false })) return Promise.resolve(`${file} was not found`)
   return new Promise((resolve) => {
-    const child = spawn(file, [...args], { cwd: opts.cwd, env: opts.env ?? cleanEnv(), detached: true, stdio: 'ignore', windowsHide: opts.hide })
-    child.once('spawn', () => {
+    const child = spawn(file, [...args], { cwd: opts.cwd, env: opts.env ?? cleanEnv(), stdio: 'ignore', windowsHide: opts.hide })
+    let timer: NodeJS.Timeout | undefined
+    let settled = false
+    const settle = (r: string | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       child.unref()
-      resolve(null)
+      resolve(r)
+    }
+    child.once('spawn', () => {
+      timer = setTimeout(() => settle(null), opts.watchMs ?? EARLY_EXIT_MS)
     })
-    child.once('error', (e) => resolve(e.message))
+    child.once('exit', (code) => settle(code === 0 ? null : `${basename(file)} exited with ${code ?? 'a signal'}.`))
+    child.on('error', (e) => settle(e.message))
   })
 }
 

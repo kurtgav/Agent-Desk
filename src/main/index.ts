@@ -194,6 +194,8 @@ async function sessionFor(id: string): Promise<Session | null> {
 }
 
 const UNKNOWN: ActionResult = { ok: false, error: 'AgentDeck does not know this session (any more).' }
+/** The renderer already runs nothing in demo (D-094); main refuses too, in case it is asked anyway. */
+const DEMO_REFUSED: ActionResult = { ok: false, error: 'Demo data: nothing was run.' }
 
 /** Only our own page may call into main (ADR-0010). */
 function fromApp(e: IpcMainInvokeEvent): boolean {
@@ -359,7 +361,7 @@ function start(): void {
     const s = await sessionFor(SessionId.parse(id))
     return s ? logs(s, actionDeps) : UNKNOWN
   })
-  handle(IPC.openFile, (_e, path) => openFile(z.string().min(3).max(1024).parse(path)))
+  handle(IPC.openFile, (_e, path) => (demo ? DEMO_REFUSED : openFile(z.string().min(3).max(1024).parse(path))))
   registerAutostartOnce(configFile())
 
   win = newWindow(process.argv.includes('--hidden'))

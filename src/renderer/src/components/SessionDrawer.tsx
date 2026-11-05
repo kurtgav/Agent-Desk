@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
 import { CircleCheck, Circle, Copy, FolderOpen, MonitorUp, RefreshCw, Square, SquareTerminal, X } from 'lucide-react'
-import type { LogsResult } from '@shared/bridge'
+import type { LogsResult, SessionAction } from '@shared/bridge'
 import type { SessionDetail, TimelineEntry } from '@shared/detail'
 import type { Session, Surface } from '@shared/snapshot'
 import { useUi } from '@/store'
@@ -17,26 +17,38 @@ const SURFACE: Record<Surface, string> = { cli: 'Terminal', desktop: 'Claude Des
 
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'ready'; detail: SessionDetail }
 
-/** Live: refetched whenever the session's last event moves, so the timeline follows it. Demo: built from the snapshot. */
+/** A busy session emits several events a second; each read runs SQLite queries on the collector's hook thread. */
+const REFETCH_MS = 500
+
+/**
+ * Live: refetched when the session's last event moves, at most every REFETCH_MS, so the timeline follows it.
+ * A failed read (collector busy or restarting) keeps what is on screen. Demo: built from the snapshot.
+ */
 function useDetail(id: string | null): Load {
   const snapshot = useUi((s) => s.snapshot)
   const live = snapshot.sessions.find((s) => s.id === id)
   // Keyed by session, so switching rows never shows the previous session's detail.
   const [got, setGot] = useState<{ id: string; detail: SessionDetail | null } | null>(null)
+  const last = useRef<{ id: string; at: number } | null>(null)
   const demo = snapshot.mode === 'demo' || !window.agentdeck
   const stamp = live?.lastEventAt
 
   useEffect(() => {
     if (!id || demo) return
     let current = true
-    void window.agentdeck!
-      .getDetail(id)
-      .catch(() => null)
-      .then((detail) => {
-        if (current) setGot({ id, detail })
-      })
+    const wait = last.current?.id === id ? Math.max(0, last.current.at + REFETCH_MS - Date.now()) : 0
+    const timer = setTimeout(() => {
+      last.current = { id, at: Date.now() }
+      void window.agentdeck!
+        .getDetail(id)
+        .catch(() => null)
+        .then((detail) => {
+          if (current) setGot((prev) => (detail === null && prev?.id === id && prev.detail ? prev : { id, detail }))
+        })
+    }, wait)
     return () => {
       current = false
+      clearTimeout(timer)
     }
   }, [id, demo, stamp])
 
@@ -160,30 +172,55 @@ function StopButton({ session }: { session: Session }) {
 /** Attach / Stop for background sessions, Desktop for Desktop ones, the terminal's folder for interactive ones (UI_MAP). */
 function Actions({ session }: { session: Session }) {
   const bg = session.bgId !== null
+  // A second click while the first is still starting would open a second window.
+  const busy = useRef(false)
+  const run = (action: SessionAction): void => {
+    if (busy.current) return
+    busy.current = true
+    void sessionAction(action, session).finally(() => {
+      busy.current = false
+    })
+  }
   return (
     <div className="flex flex-wrap items-center gap-2">
       {bg && (
-        <Button variant="primary" size="sm" onClick={() => void sessionAction('attach', session)}>
+        <Button variant="primary" size="sm" onClick={() => run('attach')}>
           <SquareTerminal size={14} strokeWidth={1.75} />
           Attach
         </Button>
       )}
       {bg && session.status !== 'done' && <StopButton session={session} />}
       {session.surface === 'desktop' && (
-        <Button variant="primary" size="sm" onClick={() => void sessionAction('open-desktop', session)}>
+        <Button variant="primary" size="sm" onClick={() => run('open-desktop')}>
           <MonitorUp size={14} strokeWidth={1.75} />
           Open in Claude Desktop
         </Button>
       )}
-      <Button size="sm" onClick={() => void sessionAction('open-folder', session)}>
-        <FolderOpen size={14} strokeWidth={1.75} />
-        Open in VS Code
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => void sessionAction('copy-resume', session)}>
+      {session.cwd && (
+        <Button size="sm" onClick={() => run('open-folder')}>
+          <FolderOpen size={14} strokeWidth={1.75} />
+          Open in VS Code
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" onClick={() => run('copy-resume')}>
         <Copy size={14} strokeWidth={1.75} />
         Copy resume command
       </Button>
     </div>
+  )
+}
+
+/**
+ * While the drawer is open, Radix hides the rest of the window from screen readers, the bottom Notice included,
+ * so action results are announced from in here too.
+ */
+function Announcer() {
+  const notice = useUi((s) => s.notice)
+  return (
+    <>
+      <div className="sr-only" aria-live="polite">{notice?.tone === 'ok' ? notice.text : ''}</div>
+      <div className="sr-only" aria-live="assertive">{notice?.tone === 'error' ? notice.text : ''}</div>
+    </>
   )
 }
 
@@ -232,10 +269,10 @@ function Body({ detail, now }: { detail: SessionDetail; now: number }) {
           <Tabs.Trigger value="final" className={tab}>Final message</Tabs.Trigger>
           {s.bgId && <Tabs.Trigger value="logs" className={tab}>Logs</Tabs.Trigger>}
         </Tabs.List>
-        <Tabs.Content value="timeline" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none">
+        <Tabs.Content value="timeline" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
           <Timeline entries={detail.timeline} now={now} />
         </Tabs.Content>
-        <Tabs.Content value="plan" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none">
+        <Tabs.Content value="plan" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
           {detail.tasks.length ? (
             <ol className="flex flex-col gap-1.5">
               {detail.tasks.map((t) => (
@@ -249,7 +286,7 @@ function Body({ detail, now }: { detail: SessionDetail; now: number }) {
             <Empty>No plan. The session didn't create tasks.</Empty>
           )}
         </Tabs.Content>
-        <Tabs.Content value="files" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none">
+        <Tabs.Content value="files" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
           {detail.files.length ? (
             <ul className="flex flex-col">
               {detail.files.map((f) => (
@@ -268,7 +305,7 @@ function Body({ detail, now }: { detail: SessionDetail; now: number }) {
             <Empty>No files changed by this session.</Empty>
           )}
         </Tabs.Content>
-        <Tabs.Content value="final" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none">
+        <Tabs.Content value="final" className="min-h-0 flex-1 overflow-y-auto py-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
           {detail.finalMessage ? (
             <p className="whitespace-pre-wrap rounded-tile bg-well p-3 text-[13px] leading-5 [overflow-wrap:anywhere]">{detail.finalMessage}</p>
           ) : (
@@ -276,7 +313,7 @@ function Body({ detail, now }: { detail: SessionDetail; now: number }) {
           )}
         </Tabs.Content>
         {s.bgId && (
-          <Tabs.Content value="logs" className="flex min-h-0 flex-1 flex-col py-3 outline-none">
+          <Tabs.Content value="logs" className="flex min-h-0 flex-1 flex-col py-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
             <Logs session={s} />
           </Tabs.Content>
         )}
@@ -290,13 +327,24 @@ export function SessionDrawer() {
   const id = useUi((s) => s.drawer)
   const now = useUi((s) => s.now)
   const load = useDetail(id)
+  // No Dialog.Trigger (rows, tiles and items open it), so Radix has nowhere to put focus back: remember the opener.
+  const opener = useRef<HTMLElement | null>(null)
   return (
     <Dialog.Root open={id !== null} onOpenChange={(open) => !open && useUi.getState().openDrawer(null)}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/10" />
         <Dialog.Content
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          }}
+          onCloseAutoFocus={(e) => {
+            if (!opener.current?.isConnected) return
+            e.preventDefault()
+            opener.current.focus()
+          }}
           className="fixed inset-y-0 right-0 z-50 flex w-[560px] max-w-[calc(100vw-48px)] flex-col border-l border-line bg-surface shadow-[0_16px_48px_rgb(0_0_0/0.12)] outline-none"
         >
+          <Announcer />
           {load.state === 'ready' ? (
             <Body detail={load.detail} now={now} />
           ) : (

@@ -67,9 +67,17 @@ describe('run (ADR-0008)', () => {
   })
 })
 
-describe('launch (ADR-0008)', () => {
-  it('starts a detached program and resolves once it runs', async () => {
+describe('launch (ADR-0008, D-095)', () => {
+  it('resolves null for a program that exits cleanly', async () => {
     expect(await launch(process.execPath, ['-e', ''], { hide: true })).toBeNull()
+  })
+
+  it('resolves null for one still running when the watch ends, and leaves it running', async () => {
+    expect(await launch(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], { hide: true, watchMs: 200 })).toBeNull()
+  })
+
+  it('reports a program that fails right away, by its exit code', async () => {
+    expect(await launch(process.execPath, ['-e', 'process.exit(3)'], { hide: true })).toMatch(/exited with 3\.$/)
   })
 
   it('reports why a program could not start', async () => {
