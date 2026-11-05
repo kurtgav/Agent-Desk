@@ -62,6 +62,7 @@ function Group({ title, collapsed, children }: { title: string; collapsed: boole
 
 function Switcher({ collapsed }: { collapsed: boolean }) {
   const version = useUi((s) => s.version)
+  const demo = useUi((s) => s.snapshot.mode === 'demo')
   return (
     <Menu.Root>
       <Menu.Trigger asChild>
@@ -78,7 +79,22 @@ function Switcher({ collapsed }: { collapsed: boolean }) {
       <Menu.Portal>
         <Menu.Content align="start" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
           <Menu.Label className="px-2 py-1.5 text-[12px] text-muted">AgentDeck {version}</Menu.Label>
-          <PendingMenuItem label="Demo data is on" m="M2" icon={<Check size={14} className="mt-0.5 flex-none text-ink" />} />
+          {/* ADR-0011: main switches the data source and reloads the window into the new mode. */}
+          <Menu.CheckboxItem
+            checked={demo}
+            onCheckedChange={(on) => void window.agentdeck?.setDemo(on)}
+            className="flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 outline-none data-[highlighted]:bg-ground"
+          >
+            <span className="mt-0.5 w-3.5 flex-none">
+              <Menu.ItemIndicator>
+                <Check size={14} className="text-ink" />
+              </Menu.ItemIndicator>
+            </span>
+            <span className="flex flex-col">
+              <span>Demo data</span>
+              <span className="text-[12px] text-muted">{demo ? 'Showing sample sessions' : 'Off: showing your sessions'}</span>
+            </span>
+          </Menu.CheckboxItem>
           <Menu.Separator className="my-1 h-px bg-rule" />
           <PendingMenuItem label="Diagnostics" m="M5" icon={<span className="w-3.5 flex-none" />} />
         </Menu.Content>
@@ -179,8 +195,8 @@ export function Sidebar() {
             New task
           </Button>
         )}
-        <Hint side={collapsed ? 'right' : 'bottom'} label={`Search: ${PENDING_LABEL.M2}`}>
-          <IconButton aria-label="Search" className="border border-control bg-surface" {...pending('M2')}>
+        <Hint side={collapsed ? 'right' : 'bottom'} label={`Search: ${PENDING_LABEL.M4}`}>
+          <IconButton aria-label="Search" className="border border-control bg-surface" {...pending('M4')}>
             <Search size={15} strokeWidth={1.75} />
           </IconButton>
         </Hint>
@@ -190,22 +206,22 @@ export function Sidebar() {
         <nav aria-label="Main" className="mt-3">
           <ul className="flex flex-col gap-0.5">
             <NavItem icon={House} label="Home" current collapsed={collapsed} />
-            <NavItem icon={LayoutList} label="Sessions" m="M2" collapsed={collapsed} />
+            <NavItem icon={LayoutList} label="Sessions" m="M4" collapsed={collapsed} />
             <NavItem icon={ShieldCheck} label="Approvals" badge={needsOkCount(snapshot)} m="M3" collapsed={collapsed} />
-            <NavItem icon={Files} label="Files" m="M2" collapsed={collapsed} />
-            <NavItem icon={Activity} label="Activity" m="M2" collapsed={collapsed} />
+            <NavItem icon={Files} label="Files" m="M4" collapsed={collapsed} />
+            <NavItem icon={Activity} label="Activity" m="M4" collapsed={collapsed} />
           </ul>
         </nav>
         <Group title="Recent" collapsed={collapsed}>
           {projects.map((p) => (
-            <NavItem key={p.cwd} icon={FolderClosed} label={p.name} m="M2" collapsed={collapsed} />
+            <NavItem key={p.cwd} icon={FolderClosed} label={p.name} m="M4" collapsed={collapsed} />
           ))}
         </Group>
         <Group title="Agents" collapsed={collapsed}>
           {snapshot.recentAgentTypes.map((a) => (
             <li key={a}>
-              <Hint side="right" label={PENDING_LABEL.M2}>
-                <button type="button" {...pending('M2')} className="flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-[14px] hover:bg-active/60">
+              <Hint side="right" label={PENDING_LABEL.M4}>
+                <button type="button" {...pending('M4')} className="flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-[14px] hover:bg-active/60">
                   <Avatar seed={a} size={16} />
                   <span className="truncate">{a}</span>
                 </button>
@@ -213,8 +229,8 @@ export function Sidebar() {
             </li>
           ))}
           <li>
-            <Hint side="right" label={PENDING_LABEL.M2}>
-              <button type="button" {...pending('M2')} className="flex h-[30px] w-full items-center rounded-lg px-2 text-[14px] text-muted hover:bg-active/60">
+            <Hint side="right" label={PENDING_LABEL.M4}>
+              <button type="button" {...pending('M4')} className="flex h-[30px] w-full items-center rounded-lg px-2 text-[14px] text-muted hover:bg-active/60">
                 All agents
                 <span className="ml-auto text-[12px] tabular-nums">{snapshot.agentDefinitionCount}</span>
               </button>

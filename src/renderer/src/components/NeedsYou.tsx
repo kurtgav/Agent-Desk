@@ -5,7 +5,7 @@ import { CircleX, Eye, Hourglass, MessageCircle, ShieldAlert, Terminal } from 'l
 import type { AttentionItem, AttentionKind, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { ago } from '@/lib/format'
-import { byPriority, projectName, sessionIndex } from '@/lib/selectors'
+import { byPriority, projectName, sessionIndex, waitingWithoutItem } from '@/lib/selectors'
 import { Avatar } from './Avatar'
 import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, cn, pending } from './ui'
 
@@ -174,13 +174,14 @@ export function NeedsYou() {
   const sessions = sessionIndex(snapshot)
   const shown = items.slice(0, MAX_ROWS)
   const more = items.length - shown.length
+  const elsewhere = waitingWithoutItem(snapshot)
 
   return (
     <Card aria-labelledby="needs-you">
       <CardHeader
         id="needs-you"
         title="Needs you"
-        count={items.length}
+        count={items.length + elsewhere.length}
         countLabel="open"
         action={
           <Hint label={PENDING_LABEL.M3}>
@@ -196,6 +197,12 @@ export function NeedsYou() {
             <Row key={i.id} item={i} session={sessions.get(i.sessionId)} now={now} />
           ))}
         </ul>
+      ) : elsewhere.length ? (
+        // D-054: no attention items before M3, but a waiting session must not read as "nothing".
+        <p className="border-t border-rule px-4 py-6 text-[13px]">
+          Waiting in its own window: <span className="font-medium">{elsewhere.map((x) => x.name).join(', ')}</span>.{' '}
+          <span className="text-muted">Answering from AgentDeck arrives in M3.</span>
+        </p>
       ) : (
         <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">Nothing needs you right now.</p>
       )}

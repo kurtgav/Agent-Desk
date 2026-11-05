@@ -86,8 +86,8 @@ export function RunningNow({ className }: { className?: string }) {
         count={sessions.length}
         countLabel="active"
         action={
-          <Hint label={PENDING_LABEL.M2}>
-            <Button variant="ghost" size="sm" {...pending('M2')}>
+          <Hint label={PENDING_LABEL.M4}>
+            <Button variant="ghost" size="sm" {...pending('M4')}>
               View all
             </Button>
           </Hint>
