@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Popover from '@radix-ui/react-popover'
 import { CircleX, Eye, Hourglass, MessageCircle, ShieldAlert, Terminal } from 'lucide-react'
@@ -130,10 +130,18 @@ function Actions({ item, session }: { item: AttentionItem; session: Session | un
   )
 }
 
-function Row({ item, session, now }: { item: AttentionItem; session: Session | undefined; now: number }) {
+function Row({ item, session, now, flash, rowRef }: { item: AttentionItem; session: Session | undefined; now: number; flash: boolean; rowRef: (el: HTMLLIElement | null) => void }) {
   const k = KIND[item.kind]
   return (
-    <li className="flex min-h-[58px] items-center gap-3 border-t border-rule px-4 py-2.5">
+    <li
+      ref={rowRef}
+      tabIndex={-1}
+      data-item={item.id}
+      className={cn(
+        'flex min-h-[58px] items-center gap-3 border-t border-rule px-4 py-2.5 outline-none transition-[background-color] duration-300 ease-out',
+        flash && 'bg-[var(--needs-bg)]'
+      )}
+    >
       <span
         className="grid size-7 flex-none place-items-center rounded-lg"
         style={{ background: `var(--${k.tone}-bg)`, color: `var(--${k.tone}-ink)` }}
@@ -167,13 +175,44 @@ function Row({ item, session, now }: { item: AttentionItem; session: Session | u
   )
 }
 
+const FLASH_MS = 2_000
+
+/** A toast was clicked (ADR-0013): reveal that row, scroll to it, focus it and tint it briefly. */
+function useRevealedItem(setExpanded: (v: boolean) => void): { flash: string | null; rows: Map<string, HTMLLIElement> } {
+  const focused = useUi((s) => s.focusedItem)
+  const [flash, setFlash] = useState<string | null>(null)
+  const rows = useRef(new Map<string, HTMLLIElement>()).current
+
+  useEffect(() => {
+    if (!focused) return
+    useUi.getState().focusItem(null) // consumed, so a second click on the same toast works again
+    const index = byPriority(useUi.getState().snapshot.attention).findIndex((i) => i.id === focused)
+    if (index < 0) return // answered meanwhile
+    if (index >= MAX_ROWS) setExpanded(true)
+    setFlash(focused)
+  }, [focused, setExpanded])
+
+  useEffect(() => {
+    if (!flash) return
+    const row = rows.get(flash)
+    row?.scrollIntoView({ block: 'nearest' })
+    row?.focus({ preventScroll: true })
+    const t = setTimeout(() => setFlash(null), FLASH_MS)
+    return () => clearTimeout(t)
+  }, [flash, rows])
+
+  return { flash, rows }
+}
+
 export function NeedsYou() {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
+  const [expanded, setExpanded] = useState(false)
+  const { flash, rows } = useRevealedItem(setExpanded)
   const items = byPriority(snapshot.attention)
   const sessions = sessionIndex(snapshot)
-  const shown = items.slice(0, MAX_ROWS)
-  const more = items.length - shown.length
+  const shown = expanded ? items : items.slice(0, MAX_ROWS)
+  const more = items.length - Math.min(items.length, MAX_ROWS)
   const elsewhere = waitingWithoutItem(snapshot)
 
   return (
@@ -184,24 +223,34 @@ export function NeedsYou() {
         count={items.length + elsewhere.length}
         countLabel="open"
         action={
-          <Hint label={PENDING_LABEL.M3}>
-            <Button variant="ghost" size="sm" {...pending('M3')}>
-              {more > 0 ? `See all (${more} more)` : 'See all'}
+          more > 0 && (
+            <Button variant="ghost" size="sm" aria-expanded={expanded} aria-controls="needs-you-list" onClick={() => setExpanded(!expanded)}>
+              {expanded ? 'Show fewer' : `See all (${more} more)`}
             </Button>
-          </Hint>
+          )
         }
       />
       {shown.length ? (
-        <ul>
+        <ul id="needs-you-list" className={cn(expanded && 'max-h-[420px] overflow-y-auto')}>
           {shown.map((i) => (
-            <Row key={i.id} item={i} session={sessions.get(i.sessionId)} now={now} />
+            <Row
+              key={i.id}
+              item={i}
+              session={sessions.get(i.sessionId)}
+              now={now}
+              flash={flash === i.id}
+              rowRef={(el) => {
+                if (el) rows.set(i.id, el)
+                else rows.delete(i.id)
+              }}
+            />
           ))}
         </ul>
       ) : elsewhere.length ? (
-        // D-054: no attention items before M3, but a waiting session must not read as "nothing".
+        // D-054: a waiting session with no item (the poll saw a wait it can't name) must not read as "nothing".
         <p className="border-t border-rule px-4 py-6 text-[13px]">
           Waiting in its own window: <span className="font-medium">{elsewhere.map((x) => x.name).join(', ')}</span>.{' '}
-          <span className="text-muted">Answering from AgentDeck arrives in M3.</span>
+          <span className="text-muted">Answer it where it runs.</span>
         </p>
       ) : (
         <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">Nothing needs you right now.</p>

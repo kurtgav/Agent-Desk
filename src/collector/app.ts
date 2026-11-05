@@ -1,6 +1,7 @@
 import { readdirSync } from 'node:fs'
 import type { Server } from 'node:http'
 import type { Snapshot } from '@shared/snapshot'
+import { DEFAULT_STALL, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
 import { resolveClaude, run } from './cli'
 import { normalizeHook } from './normalize'
@@ -11,6 +12,8 @@ import { Store } from './store'
 const PRUNE_EVERY_MS = 6 * 3_600_000
 const AGENT_COUNT_TTL_MS = 60_000
 const POLL_TIMEOUT_MS = 10_000
+/** P3 stall checks; the thresholds are minutes, so a few seconds of lag is invisible. */
+const STALL_TICK_MS = 5_000
 
 export interface CollectorOptions {
   dbPath: string
@@ -20,6 +23,7 @@ export interface CollectorOptions {
   agentsDir: string | null
   /** Settings override for the CLI path (D-024); false turns the poller off (tests). */
   claude: string | undefined | false
+  stall?: StallConfig
   /** Something the UI shows changed. */
   onChange(): void
   onError(err: unknown): void
@@ -30,6 +34,7 @@ export interface Collector {
   snapshot(): Snapshot
   setVisible(visible: boolean): void
   setFocused(focused: boolean, at: number): void
+  dismiss(id: string): void
   close(): Promise<void>
 }
 
@@ -56,15 +61,21 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
   let away: { since: number | null; until: number | null } = { since: null, until: null }
   let agents = { count: countAgents(o.agentsDir), at: Date.now() }
 
-  const ingest = (events: AgentEvent[]): void => {
+  const stallCfg = o.stall ?? DEFAULT_STALL
+  let poller: Poller | null = null
+  /** Every change may open or close a P1 item, which starts or ends the 1 s poll. */
+  const changed = (): void => {
+    poller?.setFastUntil(store.fastPollUntil())
+    o.onChange()
+  }
+  const guarded = (fn: () => boolean): void => {
     try {
-      if (store.ingest(events)) o.onChange()
+      if (fn()) changed()
     } catch (err) {
       o.onError(err)
     }
   }
-
-  let poller: Poller | null = null
+  const ingest = (events: AgentEvent[]): void => guarded(() => store.ingest(events))
   if (o.claude !== false) {
     let cli: string | null = null
     const override = o.claude
@@ -131,7 +142,9 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     throw err
   }
   poller?.start()
+  poller?.setFastUntil(store.fastPollUntil()) // items reloaded from the database
   const pruner = setInterval(prune, PRUNE_EVERY_MS)
+  const stallTimer = setInterval(() => guarded(() => store.tick(Date.now(), stallCfg)), STALL_TICK_MS)
 
   return {
     port,
@@ -142,8 +155,10 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       away = focused ? { since: away.since, until: away.since === null ? null : (away.until ?? at) } : { since: at, until: null }
       o.onChange()
     },
+    dismiss: (id) => guarded(() => store.dismiss(id, Date.now(), stallCfg)),
     close: async () => {
       clearInterval(pruner)
+      clearInterval(stallTimer)
       poller?.stop()
       await new Promise<void>((resolve) => {
         server.close(() => resolve())

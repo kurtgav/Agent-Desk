@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentDeckBridge } from '@shared/bridge'
+import type { AgentDeckBridge, AppStatus } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from './demo/snapshot'
 import { connect, useUi } from './store'
@@ -55,6 +55,8 @@ describe('resolve (demo answers stay local)', () => {
 describe('connect (D-059: no collector, no "All quiet")', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  const STATUS: AppStatus = { hooks: 'missing', hooksError: null, conflicts: [], pausedUntil: null }
+
   function fakeBridge(demo: boolean) {
     let push: (s: Snapshot | null) => void = () => undefined
     const bridge: AgentDeckBridge = {
@@ -64,11 +66,35 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
         push = l
         return () => undefined
       },
-      setDemo: async () => undefined
+      setDemo: async () => undefined,
+      getStatus: async () => STATUS,
+      onStatus: () => () => undefined,
+      onFocusItem: () => () => undefined,
+      dismiss: vi.fn(async () => undefined),
+      pauseNotifications: async () => undefined,
+      previewInstall: async () => ({ ok: false, path: '', error: 'x' }),
+      previewUninstall: async () => ({ ok: false, path: '', error: 'x' }),
+      installHooks: async () => ({ ok: true }),
+      uninstallHooks: async () => ({ ok: true })
     }
     vi.stubGlobal('window', { agentdeck: bridge })
-    return (s: Snapshot | null) => push(s)
+    return Object.assign((s: Snapshot | null) => push(s), { bridge })
   }
+
+  it('live Dismiss goes to main and leaves the item for the next snapshot to drop; P1 never dismisses', async () => {
+    const push = fakeBridge(false)
+    connect()
+    await vi.waitFor(() => expect(useUi.getState().status).toEqual(STATUS))
+    const live = { ...demoSnapshot(NOW), mode: 'live' as const }
+    push(live)
+    const p4 = live.attention.find((i) => i.priority > 1)!
+    const p1 = live.attention.find((i) => i.priority === 1)!
+    useUi.getState().resolve(p4.id, 'dismissed')
+    useUi.getState().resolve(p1.id, 'dismissed')
+    expect(push.bridge.dismiss).toHaveBeenCalledTimes(1)
+    expect(push.bridge.dismiss).toHaveBeenCalledWith(p4.id)
+    expect(useUi.getState().snapshot.attention).toHaveLength(live.attention.length)
+  })
 
   it('is connecting until the first snapshot, down while the collector restarts, up again after', async () => {
     useUi.setState({ link: 'connecting' })

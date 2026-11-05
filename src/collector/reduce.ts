@@ -15,6 +15,8 @@ export interface Inflight {
   toolName: string
   input: unknown
   summary: string
+  /** For the "one tool running > M min" stall rule (STATE_MACHINE § 3 P3). Absent in pre-M3 rows. */
+  startedAt?: number
 }
 
 export interface AgentRun {
@@ -179,8 +181,11 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
   const setStatus = (next: Status): void => {
     if (s.status === next) return
     if (s.status === 'working' && s.workingSince !== null && ev.ts > s.workingSince) out.span = [s.workingSince, ev.ts]
+    // Waiting for your answer isn't run time: an approved tool's stall clock (P3, M) starts once it may run.
+    const inflight = s.status === 'needs_you' && next === 'working' ? s.inflight.map((t) => ({ ...t, startedAt: ev.ts })) : s.inflight
     s = {
       ...s,
+      inflight,
       status: next,
       workingSince: next === 'working' ? ev.ts : null,
       waitingSince: next === 'needs_you' ? (s.waitingSince ?? ev.ts) : null
@@ -214,7 +219,9 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
       break
     case 'tool.started': {
       if (ev.toolUseId && ev.toolName && !s.inflight.some((t) => t.toolUseId === ev.toolUseId)) {
-        const call: Inflight = { toolUseId: ev.toolUseId, agentId: ev.agentId, toolName: ev.toolName, input: p.tool_input, summary: ev.summary }
+        const call: Inflight = {
+          toolUseId: ev.toolUseId, agentId: ev.agentId, toolName: ev.toolName, input: p.tool_input, summary: ev.summary, startedAt: ev.ts
+        }
         s = { ...s, inflight: [...s.inflight, call] }
       }
       if (main) {

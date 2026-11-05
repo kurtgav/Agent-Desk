@@ -207,7 +207,7 @@ export function Sidebar() {
           <ul className="flex flex-col gap-0.5">
             <NavItem icon={House} label="Home" current collapsed={collapsed} />
             <NavItem icon={LayoutList} label="Sessions" m="M4" collapsed={collapsed} />
-            <NavItem icon={ShieldCheck} label="Approvals" badge={needsOkCount(snapshot)} m="M3" collapsed={collapsed} />
+            <NavItem icon={ShieldCheck} label="Approvals" badge={needsOkCount(snapshot)} m="M4" collapsed={collapsed} />
             <NavItem icon={Files} label="Files" m="M4" collapsed={collapsed} />
             <NavItem icon={Activity} label="Activity" m="M4" collapsed={collapsed} />
           </ul>

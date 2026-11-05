@@ -59,6 +59,8 @@ export const AttentionItem = z.object({
   riskFlags: z.array(z.string()),
   /** A remote-approval hook is holding the request, so Approve/Reject can answer it. */
   held: z.boolean(),
+  /** P4 only: the final message ends by asking you something (STATE_MACHINE § 4). */
+  asked: z.boolean().optional(),
   openedAt: Ts
 })
 export type AttentionItem = z.infer<typeof AttentionItem>

@@ -21,7 +21,12 @@ function Mark([int]$size, [string]$file, [string]$dot) {
   $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, 255, 255, 255))), (RoundRect (5.5 * $u) (3 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
   $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), (RoundRect (3 * $u) (6.5 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
   if ($dot) {
-    $c = if ($dot -eq 'attention') { [System.Drawing.Color]::FromArgb(255, 245, 158, 11) } else { [System.Drawing.Color]::FromArgb(255, 239, 68, 68) }
+    # ARCHITECTURE 7: amber = needs you, red = hooks missing, gray = paused
+    $c = switch ($dot) {
+      'attention' { [System.Drawing.Color]::FromArgb(255, 245, 158, 11) }
+      'paused' { [System.Drawing.Color]::FromArgb(255, 148, 163, 184) }
+      default { [System.Drawing.Color]::FromArgb(255, 239, 68, 68) }
+    }
     $g.CompositingMode = 'SourceCopy'
     $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Transparent)), (8.5 * $u), (8.5 * $u), (7.5 * $u), (7.5 * $u))
     $g.CompositingMode = 'SourceOver'
@@ -31,8 +36,28 @@ function Mark([int]$size, [string]$file, [string]$dot) {
   $g.Dispose(); $bmp.Dispose()
 }
 
+# Taskbar overlay badge: the open P1+P2 count on a red disc (white on #DC2626 is 4.8:1).
+function Badge([int]$size, [string]$file, [string]$text) {
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode = 'AntiAlias'; $g.TextRenderingHint = 'AntiAliasGridFit'; $g.Clear([System.Drawing.Color]::Transparent)
+  $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 220, 38, 38))), 0, 0, $size, $size)
+  $em = if ($text.Length -gt 1) { $size * 0.5 } else { $size * 0.66 }
+  $font = New-Object System.Drawing.Font 'Segoe UI', $em, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+  $fmt = New-Object System.Drawing.StringFormat
+  $fmt.Alignment = 'Center'; $fmt.LineAlignment = 'Center'
+  $g.DrawString($text, $font, [System.Drawing.Brushes]::White, (New-Object System.Drawing.RectangleF 0, (0.04 * $size), $size, $size), $fmt)
+  $bmp.Save((Join-Path $out $file), [System.Drawing.Imaging.ImageFormat]::Png)
+  $font.Dispose(); $g.Dispose(); $bmp.Dispose()
+}
+
 Mark 256 'icon.png' $null
-foreach ($v in @(@{ n = 'tray'; d = $null }, @{ n = 'tray-attention'; d = 'attention' }, @{ n = 'tray-failed'; d = 'failed' })) {
+foreach ($v in @(@{ n = 'tray'; d = $null }, @{ n = 'tray-attention'; d = 'attention' }, @{ n = 'tray-failed'; d = 'failed' }, @{ n = 'tray-paused'; d = 'paused' })) {
   Mark 16 "$($v.n).png" $v.d
   Mark 32 "$($v.n)@2x.png" $v.d
+}
+foreach ($n in @('1', '2', '3', '4', '5', '6', '7', '8', '9', '9+')) {
+  $name = "badge-$($n.Replace('+', 'plus'))"
+  Badge 16 "$name.png" $n
+  Badge 32 "$name@2x.png" $n
 }

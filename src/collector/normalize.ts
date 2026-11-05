@@ -37,7 +37,7 @@ const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 
 /** Backticks delimit code spans in the UI, so they can't appear inside one. */
-const code = (s: string): string => `\`${s.replace(/`/g, "'")}\``
+export const code = (s: string): string => `\`${s.replace(/`/g, "'")}\``
 
 /** Shown relative to the session cwd when inside it (case-insensitive, D-013). */
 export function displayPath(p: string, cwd: string | null): string {

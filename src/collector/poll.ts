@@ -9,6 +9,8 @@ export const VISIBLE_MS = 3_000
 export const HIDDEN_MS = 15_000
 export const BACKOFF_MS = 60_000
 export const NUDGE_MS = 300
+/** While a P1 item is open (ARCHITECTURE § 3): the poll's status flip is the earliest sign it was answered (R5). */
+export const FAST_MS = 1_000
 export const MIN_GAP_MS = 1_000
 const PS_TIMEOUT_MS = 10_000
 
@@ -129,6 +131,7 @@ export class Poller {
   private visible = true
   private failing = false
   private stopped = false
+  private fastUntil = 0
   /** A failed exe lookup is retried after the backoff, not on every poll (each try can take 10 s). */
   private exeRetryAt = 0
 
@@ -156,6 +159,12 @@ export class Poller {
   setVisible(visible: boolean): void {
     this.visible = visible
     if (visible) this.schedule(0)
+  }
+
+  /** Poll every second until `at` (a P1 item is open); 0 ends it. */
+  setFastUntil(at: number): void {
+    this.fastUntil = at
+    if (at > this.now() && !this.failing) this.schedule(FAST_MS)
   }
 
   /** A hook event just arrived: confirm with the poll soon (D-005 300 ms debounce). */
@@ -188,7 +197,8 @@ export class Poller {
       this.running = false
     }
     this.failing = !ok
-    this.schedule(ok ? (this.visible ? VISIBLE_MS : HIDDEN_MS) : BACKOFF_MS)
+    const idle = this.now() < this.fastUntil ? FAST_MS : this.visible ? VISIBLE_MS : HIDDEN_MS
+    this.schedule(ok ? idle : BACKOFF_MS)
   }
 
   private async pollOnce(): Promise<boolean> {

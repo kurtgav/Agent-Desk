@@ -113,6 +113,17 @@ describe('Poller cadence (D-005, ADR-0004)', () => {
     expect(emitted.filter((e) => e.length)).toHaveLength(1) // …but the row never changed after the first one
   })
 
+  it('polls every second while a P1 item is open, then falls back (ARCHITECTURE § 3)', async () => {
+    poller.start()
+    await vi.advanceTimersByTimeAsync(0)
+    poller.setFastUntil(1_000_000 + 3_500)
+    await vi.advanceTimersByTimeAsync(7_000)
+    expect(at()).toEqual([0, 1_000, 2_000, 3_000, 4_000, 4_000 + VISIBLE_MS])
+    poller.setFastUntil(0) // closed: no change to the next poll
+    await vi.advanceTimersByTimeAsync(VISIBLE_MS)
+    expect(at().at(-1)).toBe(4_000 + VISIBLE_MS * 2)
+  })
+
   it('ends sessions the store still thought live when the first poll does not list them (D-057)', async () => {
     poller.stop()
     poller = new Poller(

@@ -57,10 +57,10 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 |---|---|---|
 | ⌂ Home breadcrumb + ☆ | breadcrumb | current route (Home / Sessions / session name). Star dropped (no data) |
 | Search in project ⌘K | **Search… Ctrl+K** | palette: sessions, projects, files, actions (New task, Pause notifications, Diagnostics, Install integration…) |
-| blue app chip | **Live chip** | `Live` (hooks installed + collector up + event or poll < 30 s), `Paused` (notifications paused), `Hooks missing` (red; click to Repair) |
+| blue app chip | **Live chip** | `Live` (hooks installed, no settings conflict, collector up), `Paused` (notifications paused; tooltip says until when), `Hooks missing` (red, also for a conflict, D-068; click → install dialog with the masked diff). Hidden in demo and while the collector is down (that banner says so). *M3:* no "event < 30 s" condition: an idle machine sends nothing, and that is still live (D-078) |
 | avatar stack | active agents | up to 3 avatars of Working/Needs-you sessions, "+N" overflow; click → Sessions |
 | Share | **New task** (pill) | focuses composer / opens dispatch dialog |
-| ⋯ | overflow | Pause notifications (1 h / until tomorrow / resume), Diagnostics, Settings |
+| ⋯ | overflow | Pause notifications (1 h / until tomorrow 08:00 / resume, D-067), Uninstall integration… (live only, D-069), Diagnostics, Settings (M5) |
 
 ## Greeting + composer
 | Reference | AgentDeck | Data / action |
@@ -90,7 +90,7 @@ Before the first snapshot, and whenever the collector exits until main has resta
 ## Main column
 | Reference | AgentDeck | Data / action |
 |---|---|---|
-| Needs your approval (3) + See all | **Needs you** (count) + See all → Approvals | attention items sorted priority→age (STATE_MACHINE § 3). Row: type icon, title (exact tool/command or question), meta "agent · project · age", risk flag chips |
+| Needs your approval (3) + See all | **Needs you** (count) + See all (expands in place; the Approvals page is M4, D-070) | attention items sorted priority→age (STATE_MACHINE § 3). Row: type icon, title (exact tool/command or question), meta "agent · project · age", risk flag chips |
 | Reject / Approve | actions | **Only on held P1 approvals** (remote approvals on). Risky items → confirm dialog showing the full command. Otherwise: **Attach** (bg), **Open in Desktop** (Desktop surface), **Answer in terminal** (interactive CLI; shows cwd), **Open**, **Dismiss** (P2–P4) |
 | Running now (4) + View tasks | **Running now** (count) + View all → Sessions | one row per working/needs-you session; subagents nested (indented, type + task). Activity text from latest tool (EVENT_SCHEMA § Activity text). "Step 2 of 4" from tasks; bar determinate only with a plan, else indeterminate |
 | "About 2 min left" | caption | elapsed "12m" or "Waiting 3m". **No ETAs** |

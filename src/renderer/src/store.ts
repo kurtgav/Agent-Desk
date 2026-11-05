@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { AppStatus } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from './demo/snapshot'
 
@@ -32,12 +33,20 @@ interface UiState {
   /** `--agent` choice; null = Claude Code's default. */
   composerAgent: string | null
   announcement: string
+  /** Hooks and notification state from main; null in demo and before main answers. */
+  status: AppStatus | null
+  /** A toast was clicked: Needs you reveals this item. */
+  focusedItem: string | null
   tick(now: number): void
   toggleSidebar(): void
   cycleEffort(): void
   setComposerCwd(cwd: string): void
   setComposerAgent(agent: string | null): void
-  /** Demo only: answering an item removes it locally; nothing is sent anywhere (D-035). */
+  focusItem(id: string | null): void
+  /**
+   * Live: Dismiss goes to the attention engine; the next snapshot drops the item. Approve/Reject on live items arrive
+   * with held approvals (M4). Demo: answering removes the item locally; nothing is sent anywhere (D-035).
+   */
   resolve(itemId: string, outcome: Outcome): void
 }
 
@@ -70,11 +79,19 @@ export function connect(): () => void {
   }
   let live = true
   let pushed = false
-  const off = bridge.onSnapshot((snapshot) => {
-    pushed = true
-    if (!live) return
-    useUi.setState(snapshot ? { snapshot, link: 'up' } : { snapshot: emptySnapshot(Date.now()), link: 'down' })
-  })
+  let statusPushed = false
+  const offs = [
+    bridge.onSnapshot((snapshot) => {
+      pushed = true
+      if (!live) return
+      useUi.setState(snapshot ? { snapshot, link: 'up' } : { snapshot: emptySnapshot(Date.now()), link: 'down' })
+    }),
+    bridge.onStatus((status) => {
+      statusPushed = true
+      if (live) useUi.setState({ status })
+    }),
+    bridge.onFocusItem((id) => useUi.setState({ focusedItem: id }))
+  ]
   void bridge
     .getAppInfo()
     .then(async (info) => {
@@ -84,12 +101,13 @@ export function connect(): () => void {
         useUi.setState({ snapshot: demoSnapshot(Date.now()), link: 'up' })
         return
       }
-      const snapshot = await bridge.getSnapshot()
-      // A push may have landed while this was in flight, and it is newer than main's cached copy.
+      const [snapshot, status] = await Promise.all([bridge.getSnapshot(), bridge.getStatus()])
+      // A push may have landed while these were in flight, and it is newer than main's cached copy.
       if (snapshot && !pushed) useUi.setState({ snapshot, link: 'up' })
+      if (!statusPushed) useUi.setState({ status })
     })
     .catch(() => undefined)
-  return off
+  return () => offs.forEach((off) => off())
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -102,7 +120,10 @@ export const useUi = create<UiState>((set) => ({
   composerCwd: null,
   composerAgent: null,
   announcement: '',
+  status: null,
+  focusedItem: null,
   tick: (now) => set({ now }),
+  focusItem: (id) => set({ focusedItem: id }),
   toggleSidebar: () =>
     set((s) => {
       const next = !s.sidebarCollapsed
@@ -119,7 +140,11 @@ export const useUi = create<UiState>((set) => ({
   resolve: (itemId, outcome) =>
     set((s) => {
       const item = s.snapshot.attention.find((a) => a.id === itemId)
-      if (!item || s.snapshot.mode !== 'demo') return {} // live answers arrive with M4
+      if (!item) return {}
+      if (s.snapshot.mode !== 'demo') {
+        if (outcome === 'dismissed' && item.priority > 1) void window.agentdeck?.dismiss(itemId).catch(() => undefined)
+        return { announcement: outcome === 'dismissed' ? `Dismissed: ${item.title.replace(/`/g, '')}` : '' }
+      }
       const attention = s.snapshot.attention.filter((a) => a.id !== itemId)
       const stillWaiting = attention.some((a) => a.sessionId === item.sessionId && a.priority === 1)
       const sessions = s.snapshot.sessions.map((x) =>

@@ -51,5 +51,7 @@ parent.on('message', (e: { data: ToCollector }) => {
   } else if (m.type === 'focus') {
     away = m
     collector?.setFocused(m.focused, m.at)
+  } else if (m.type === 'dismiss') {
+    collector?.dismiss(m.id)
   }
 })
