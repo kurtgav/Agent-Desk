@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
 import { ArrowUp, AtSign, Check, ChevronDown, FolderSearch, LoaderCircle, Plus, X, Zap } from 'lucide-react'
-import type { AgentDef } from '@shared/bridge'
+import { PROMPT_MAX, type AgentDef } from '@shared/bridge'
 import { useUi } from '@/store'
 import { dispatchTask, loadAgents, pickFolder, runClaudeThere } from '@/lib/act'
 import { projectName, recentProjects } from '@/lib/selectors'
@@ -95,7 +95,8 @@ function AgentPicker(props: {
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return
                 e.preventDefault()
-                if (shown[0]) pick(shown[0].name)
+                // Enter takes the first match of what was typed; with nothing typed it picks nothing.
+                if (needle && shown[0]) pick(shown[0].name)
               }}
               placeholder="Search subagents"
               aria-label="Search subagents"
@@ -105,7 +106,7 @@ function AgentPicker(props: {
           <ul ref={list} className="max-h-72 overflow-y-auto p-1">
             {props.withDefault && !needle && (
               <li>
-                <button type="button" className={row} onClick={() => pick(null)}>
+                <button type="button" className={row} aria-current={props.current === null || undefined} onClick={() => pick(null)}>
                   {check(null)}
                   <span>Default (no --agent)</span>
                 </button>
@@ -118,7 +119,7 @@ function AgentPicker(props: {
             ) : (
               shown.map((a) => (
                 <li key={a.name}>
-                  <button type="button" className={row} onClick={() => pick(a.name)}>
+                  <button type="button" className={row} aria-current={props.current === a.name || undefined} onClick={() => pick(a.name)}>
                     {check(a.name)}
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5">
@@ -150,6 +151,8 @@ export function Composer() {
   const { effort, composerCwd, composerAgent, cycleEffort, setComposerCwd, setComposerAgent, notify } = useUi()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  /** "Run claude there" is starting a terminal; a second click would open a second one. */
+  const [opening, setOpening] = useState(false)
   const [untrusted, setUntrusted] = useState<{ cwd: string; error: string } | null>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const caret = useRef<number | null>(null)
@@ -162,12 +165,14 @@ export function Composer() {
 
   const submit = async (): Promise<void> => {
     if (blocked || !project) return
+    const sent = text
     setBusy(true)
-    const r = await dispatchTask({ prompt: text, cwd: project.cwd, agent: composerAgent, effort })
+    const r = await dispatchTask({ prompt: sent, cwd: project.cwd, agent: composerAgent, effort })
     setBusy(false)
     if (!r) return
     if (r.ok) {
-      setText('')
+      // Keep anything typed while the task was starting.
+      setText((cur) => (cur === sent ? '' : cur))
       setUntrusted(null)
       notify(`Started ${r.name} in ${project.name}.`)
     } else if (r.untrusted) setUntrusted({ cwd: project.cwd, error: r.error })
@@ -201,7 +206,7 @@ export function Composer() {
         ref={input}
         rows={1}
         value={text}
-        maxLength={20_000}
+        maxLength={PROMPT_MAX}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // Enter sends, Shift+Enter is a new line; an IME composition keeps its own Enter.
@@ -286,7 +291,16 @@ export function Composer() {
       {trust && (
         <div role="alert" className="mb-1 mt-2 flex items-center gap-3 rounded-tile bg-[var(--failed-bg)] py-2 pl-3 pr-1.5 text-[13px] text-[var(--failed-ink)]">
           <p className="min-w-0 flex-1 text-pretty [overflow-wrap:anywhere]">{trust.error}</p>
-          <Button size="sm" onClick={() => void runClaudeThere(trust.cwd)}>
+          <Button
+            size="sm"
+            aria-busy={opening}
+            className="aria-busy:opacity-60"
+            onClick={() => {
+              if (opening) return
+              setOpening(true)
+              void runClaudeThere(trust.cwd).finally(() => setOpening(false))
+            }}
+          >
             Run claude there
           </Button>
           <IconButton aria-label="Dismiss" className="text-[var(--failed-ink)]" onClick={() => setUntrusted(null)}>

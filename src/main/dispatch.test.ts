@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import type { DispatchRequest } from '@shared/bridge'
-import { dispatchArgs, dispatchResult, knownFolder, sessionName } from './dispatch'
+import type { AgentDef, DispatchRequest } from '@shared/bridge'
+import { NOT_KNOWN, NOT_LOCAL, dispatchArgs, dispatchResult, knownFolder, refusal, sessionName } from './dispatch'
 
 const req = (over: Partial<DispatchRequest> = {}): DispatchRequest => ({ prompt: 'Fix the flaky login test', cwd: 'D:\\p', agent: null, effort: 'high', ...over })
 
@@ -64,5 +64,24 @@ describe('knownFolder', () => {
     expect(await knownFolder(dir, ['D:\\other'])).toBe(false)
     expect(await knownFolder('D:\\no\\such\\folder', ['D:\\no\\such\\folder'])).toBe(false)
     expect(await knownFolder('\\\\host\\share', ['\\\\host\\share'])).toBe(false)
+  })
+})
+
+describe('refusal (ADR-0010: main checks what the page sends)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agentdeck-refusal-'))
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+  const agents = async (): Promise<AgentDef[]> => [{ name: 'code-reviewer', description: '', model: null, scope: 'user' }]
+
+  it('runs only in a known local folder, with a subagent defined for it', async () => {
+    expect(await refusal(req({ cwd: dir, agent: 'code-reviewer' }), [dir], agents)).toBeNull()
+    expect(await refusal(req({ cwd: '\\\\host\\share' }), ['\\\\host\\share'], agents)).toBe(NOT_LOCAL)
+    expect(await refusal(req({ cwd: dir }), ['D:\\other'], agents)).toBe(NOT_KNOWN)
+    expect(await refusal(req({ cwd: dir, agent: 'made-up' }), [dir], agents)).toMatch(/no subagent named made-up/)
+  })
+})
+
+describe('dispatchResult on a spawn failure', () => {
+  it("shows the reason run() reported instead of a timeout", () => {
+    expect(dispatchResult({ code: null, stdout: '', stderr: 'spawn ENAMETOOLONG' }, 'n')).toMatchObject({ ok: false, error: 'spawn ENAMETOOLONG' })
   })
 })

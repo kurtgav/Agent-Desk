@@ -63,7 +63,7 @@ describe('run (ADR-0008)', () => {
   })
 
   it('reports a missing executable instead of throwing', async () => {
-    expect(await run('Z:\\no\\such\\claude.exe', ['--version'], 1_000)).toEqual({ code: null, stdout: '', stderr: '' })
+    expect(await run('Z:\\no\\such\\claude.exe', ['--version'], 1_000)).toEqual({ code: null, stdout: '', stderr: expect.stringContaining('ENOENT') })
   })
 })
 

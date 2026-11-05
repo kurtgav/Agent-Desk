@@ -6,7 +6,7 @@ import {
 } from 'electron'
 import { z } from 'zod'
 import {
-  EFFORTS, IPC, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
+  EFFORTS, IPC, PROMPT_MAX, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
   type RemoteApprovals
 } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
@@ -18,7 +18,7 @@ import { agentList } from './agents'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, remoteApprovals, updateConfig } from './config'
-import { PROMPT_MAX, dispatch, knownFolder } from './dispatch'
+import { NOT_KNOWN, dispatch, knownFolder, refusal } from './dispatch'
 import { hookOptions, hooksState, install, previewInstall, previewUninstall, shapeFor, uninstall, type HookPaths } from './hooks'
 import { settingsPath, type HookTarget } from './hooks-install'
 import { isPaused, notifyPrefs, tomorrowMorning, type NotifyPrefs } from './notify'
@@ -244,18 +244,12 @@ const Dispatch = z.object({
   agent: z.string().min(1).max(64).nullable(),
   effort: z.enum(EFFORTS)
 })
-const refused = (error: string): DispatchResult => ({ ok: false, error, untrusted: false })
-const NOT_KNOWN = 'AgentDeck runs tasks only in a project it has seen a session in, or a folder you picked with Browse….'
-const NOT_LOCAL = 'AgentDeck runs tasks only in folders on a local drive.'
 
-/** The folder and the subagent are checked here, not trusted from the page (ADR-0010). */
 async function onDispatch(raw: unknown): Promise<DispatchResult> {
-  if (demo) return refused('Demo data: nothing was dispatched.')
+  if (demo) return { ok: false, error: 'Demo data: nothing was dispatched.', untrusted: false }
   const req = Dispatch.parse(raw)
-  if (!LOCAL_PATH.test(req.cwd)) return refused(NOT_LOCAL)
-  if (!(await knownFolder(req.cwd, knownFolders()))) return refused(NOT_KNOWN)
-  if (req.agent && !(await agentsFor(req.cwd)).some((a) => a.name === req.agent)) return refused(`There is no subagent named ${req.agent} for this project.`)
-  return dispatch(req, actionDeps)
+  const why = await refusal(req, knownFolders(), agentsFor)
+  return why ? { ok: false, error: why, untrusted: false } : dispatch(req, actionDeps)
 }
 
 async function onChooseFolder(): Promise<string | null> {
@@ -264,7 +258,8 @@ async function onChooseFolder(): Promise<string | null> {
   const r = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
   const dir = r.canceled ? undefined : r.filePaths[0]
   if (!dir) return null
-  picked.add(dir)
+  // A network folder is returned so the composer can say why it won't run there, but it never becomes "known".
+  if (LOCAL_PATH.test(dir)) picked.add(dir)
   return dir
 }
 

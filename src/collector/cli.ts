@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process'
 import { existsSync, lstatSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import spawn from 'cross-spawn'
@@ -5,7 +6,11 @@ import spawn from 'cross-spawn'
 const VERSION_RE = /^\d+\.\d+\.\d+ \(Claude Code\)/
 const VERSION_TIMEOUT_MS = 5_000
 const MAX_OUTPUT = 8 * 1024 * 1024
-/** A launch that fails does so at once (unknown id, missing file); one still running after this counts as started. */
+/**
+ * A program that fails to start does so at once; one still running after this counts as started. Only the program
+ * spawned is watched: wt.exe and PowerShell's Start-Process exit 0 once they hand off, so a `claude attach` that then
+ * fails in its own window (an unknown id) is not seen here (D-095).
+ */
 const EARLY_EXIT_MS = 2_000
 
 export interface RunResult {
@@ -47,7 +52,13 @@ export function run(
   cwd?: string
 ): Promise<RunResult> {
   return new Promise((resolve) => {
-    const child = spawn(file, [...args], { env, cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let child: ChildProcess
+    try {
+      child = spawn(file, [...args], { env, cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      // Node throws instead of emitting 'error' for some failures, e.g. ENAMETOOLONG for a command line over 32,767.
+      return resolve({ ...FAILED, stderr: (e as Error).message })
+    }
     const out: Buffer[] = []
     const err: Buffer[] = []
     let size = 0
@@ -70,7 +81,7 @@ export function run(
     }
     child.stdout?.on('data', collect(out))
     child.stderr?.on('data', collect(err))
-    child.on('error', () => settle(FAILED))
+    child.on('error', (e) => settle({ ...FAILED, stderr: e.message }))
     child.on('close', (code) => settle({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }))
   })
 }
@@ -90,7 +101,12 @@ export function launch(
   // lstat, not exists: Windows Terminal's wt.exe is an app execution alias, a reparse point stat may not follow.
   if (!lstatSync(file, { throwIfNoEntry: false })) return Promise.resolve(`${file} was not found`)
   return new Promise((resolve) => {
-    const child = spawn(file, [...args], { cwd: opts.cwd, env: opts.env ?? cleanEnv(), stdio: 'ignore', windowsHide: opts.hide })
+    let child: ChildProcess
+    try {
+      child = spawn(file, [...args], { cwd: opts.cwd, env: opts.env ?? cleanEnv(), stdio: 'ignore', windowsHide: opts.hide })
+    } catch (e) {
+      return resolve((e as Error).message)
+    }
     let timer: NodeJS.Timeout | undefined
     let settled = false
     const settle = (r: string | null): void => {

@@ -37,14 +37,14 @@ describe('agentList', () => {
   writeFileSync(join(project, 'r.md'), md('name: reviewer\ndescription: project reviewer'))
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  it('lets a project definition win over a user one of the same name, sorted by name', () => {
-    expect(agentList(user, project).map((a) => [a.name, a.description, a.scope])).toEqual([
+  it('lets a project definition win over a user one of the same name, sorted by name', async () => {
+    expect((await agentList(user, project)).map((a) => [a.name, a.description, a.scope])).toEqual([
       ['beta', 'user beta', 'user'],
       ['reviewer', 'project reviewer', 'project']
     ])
   })
 
-  it('treats a missing folder as empty', () => {
-    expect(agentList(join(root, 'nope'), null)).toEqual([])
+  it('treats a missing folder as empty', async () => {
+    expect(await agentList(join(root, 'nope'), null)).toEqual([])
   })
 })

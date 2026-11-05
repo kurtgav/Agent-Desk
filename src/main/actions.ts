@@ -84,10 +84,14 @@ function inConsole(file: string, args: readonly string[], cwd: string): Promise<
   return launch(system32('WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', command], { hide: true, env })
 }
 
-/** Windows Terminal when present, otherwise a console window (ADR-0008, F13). `args` are plain words, never user text. */
+/**
+ * Windows Terminal when present, otherwise a console window (ADR-0008, F13). `args` are plain words, never user text.
+ * wt splits its command line at `;` (Windows Terminal § Command line syntax) and documents no escape for one inside a
+ * value, so a path with a `;` takes the console window, whose values travel in env vars (D-111).
+ */
 async function inTerminal(claude: string, args: readonly string[], cwd: string): Promise<string | null> {
   const [wt] = await which('wt.exe')
-  return wt ? launch(wt, ['-d', cwd, claude, ...args], { hide: false }) : inConsole(claude, args, cwd)
+  return wt && !`${cwd}${claude}`.includes(';') ? launch(wt, ['-d', cwd, claude, ...args], { hide: false }) : inConsole(claude, args, cwd)
 }
 
 /** The fix for `Workspace not trusted` (S6): run `claude` there once and accept the trust prompt. */
@@ -98,7 +102,7 @@ export async function runClaudeIn(cwd: string, deps: ActionDeps): Promise<Action
 }
 
 /** Background ids are short and plain (S7); anything else is not passed on to a command line. */
-const BG_ID = /^[\w.-]{1,64}$/
+const BG_ID = /^\w[\w.-]{0,63}$/
 
 /** UI_MAP § Session drawer. Background-only actions refuse other sessions instead of guessing. */
 export async function act(action: SessionAction, s: Session, deps: ActionDeps): Promise<ActionResult> {

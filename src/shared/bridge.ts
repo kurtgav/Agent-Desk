@@ -62,6 +62,13 @@ export interface AgentDef {
   scope: 'user' | 'project'
 }
 
+/**
+ * The prompt rides on the command line, which Windows caps at 32,767 characters; quoting at most doubles it (D-109).
+ * shortcut: through an npm `claude.cmd` shim, cmd.exe stops at 8,191 escaped characters and says "The command line
+ * is too long.", which the composer shows; send the prompt another way if that ever matters.
+ */
+export const PROMPT_MAX = 8_000
+
 /** The composer's task: `claude --bg --name <auto> [--agent a] --effort e "<prompt>"` in `cwd`. */
 export interface DispatchRequest {
   prompt: string

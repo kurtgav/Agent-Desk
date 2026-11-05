@@ -1,17 +1,19 @@
-import { closeSync, openSync, readdirSync, readSync } from 'node:fs'
+import { open, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgentDef } from '@shared/bridge'
 
 /** Frontmatter sits at the top; 8 KB holds it for every definition on this machine (346 files). */
 const HEAD_BYTES = 8 * 1024
 
-function head(file: string): string {
-  const fd = openSync(file, 'r')
+/** Async: main runs the window, and 346 sync reads would stall it each time a picker opens. */
+async function head(file: string): Promise<string> {
+  const fh = await open(file, 'r')
   try {
     const buf = Buffer.alloc(HEAD_BYTES)
-    return buf.subarray(0, readSync(fd, buf, 0, HEAD_BYTES, 0)).toString('utf8')
+    const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0)
+    return buf.subarray(0, bytesRead).toString('utf8')
   } finally {
-    closeSync(fd)
+    await fh.close()
   }
 }
 
@@ -36,26 +38,21 @@ export function parseAgent(text: string, scope: AgentDef['scope']): AgentDef | n
 }
 
 /** Every definition in one agents folder; a missing folder or an unreadable file is skipped. */
-export function readAgents(dir: string, scope: AgentDef['scope']): AgentDef[] {
+export async function readAgents(dir: string, scope: AgentDef['scope']): Promise<AgentDef[]> {
   let files: string[]
   try {
-    files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md'))
+    files = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith('.md'))
   } catch {
     return []
   }
-  return files.flatMap((f) => {
-    try {
-      return parseAgent(head(join(dir, f)), scope) ?? []
-    } catch {
-      return []
-    }
-  })
+  const read = await Promise.all(files.map((f) => head(join(dir, f)).then((t) => parseAgent(t, scope), () => null)))
+  return read.filter((a): a is AgentDef => a !== null)
 }
 
 /** Project definitions win over user ones of the same name (sub-agents § scope priority), sorted by name. */
-export function agentList(userDir: string, projectDir: string | null): AgentDef[] {
+export async function agentList(userDir: string, projectDir: string | null): Promise<AgentDef[]> {
+  const [user, project] = await Promise.all([readAgents(userDir, 'user'), projectDir ? readAgents(projectDir, 'project') : []])
   const byName = new Map<string, AgentDef>()
-  for (const a of readAgents(userDir, 'user')) byName.set(a.name, a)
-  if (projectDir) for (const a of readAgents(projectDir, 'project')) byName.set(a.name, a)
+  for (const a of [...user, ...project]) byName.set(a.name, a)
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
