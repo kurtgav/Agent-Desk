@@ -6,8 +6,8 @@ import {
 } from 'electron'
 import { z } from 'zod'
 import {
-  EFFORTS, IPC, PROMPT_MAX, SESSION_ACTIONS, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
-  type RemoteApprovals
+  EFFORTS, IPC, PROMPT_MAX, SESSION_ACTIONS, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type CodexHooks, type DispatchResult, type HooksPreview,
+  type HooksResult, type RemoteApprovals
 } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
 import { ROLE_ID } from '@shared/roles'
@@ -22,6 +22,7 @@ import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, remoteApprovals, updateConfig } from './config'
 import { registerClaude } from './claude'
 import { removeTelemetry } from './claude-telemetry-install'
+import { codexPaths, codexState, codexTarget, installCodex, parkCurlrc, previewCodex, uninstallCodex, writeCurlrc, type CodexPaths } from './codex-hooks'
 import { registerConsole } from './console'
 import type { Dispose, MainCtx } from './ctx'
 import { NOT_KNOWN, knownFolder, startDispatch } from './dispatch'
@@ -91,15 +92,18 @@ const signals = new Signals({
 
 if (process.argv.includes('--uninstall-integration')) {
   // The installer's uninstall step (ADR-0012): take our entries out of settings.json and exit without a window.
-  // Our hook entries and our telemetry env entries (ADR-0007: those stay while AgentDeck runs, so only this removes them).
+  // Our hook entries and our telemetry env entries (ADR-0007: those stay while AgentDeck runs, so only this removes them),
+  // and our entries in Codex's hooks.json with the curlrc they read (ADR-0014: those stay while AgentDeck is closed).
   // It runs beside a live AgentDeck, so it must not take the single-instance lock.
   void app.whenReady().then(() => {
     const r = uninstall(hookPaths())
     const t = removeTelemetry(hookPaths())
+    const c = uninstallCodex(codexHookPaths())
     if (r.ok) updateConfig(configFile(), { hooksConsent: null, remoteApprovals: { ...approvalsConfig(), enabled: false } })
     else console.error(`[hooks] uninstall integration: ${r.error}`)
     if (!t.ok) console.error(`[telemetry] uninstall integration: ${t.error}`)
-    app.exit(r.ok && t.ok ? 0 : 1)
+    if (!c.ok) console.error(`[codex] uninstall integration: ${c.error}`)
+    app.exit(r.ok && t.ok && c.ok ? 0 : 1)
   })
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -176,6 +180,7 @@ function installIfConsented(): void {
  * Any recorded consent counts here, not only this version's shape: entries an older version installed must go too.
  */
 function removeHooksForQuit(): void {
+  if (!demo) parkCurlrc(codexHookPaths().curlrc) // Codex entries stay (their trust is per command), so only their target goes
   if (typeof readConfig(configFile()).hooksConsent !== 'string') return
   const r = uninstall(hookPaths())
   if (!r.ok) console.error(`[hooks] uninstall on quit: ${r.error}`)
@@ -208,6 +213,38 @@ function onPreviewInstall(on: unknown): HooksPreview {
   const t = target(withApprovals(on))
   return t ? previewInstall(hookPaths(), t) : { ok: false, path: hookPaths().settings, error: NOT_READY }
 }
+
+// ── Codex CLI hooks (ADR-0014) ──
+
+function codexHookPaths(): CodexPaths {
+  return codexPaths(process.env, homedir(), app.getPath('userData'))
+}
+
+function codexStatus(): CodexHooks {
+  const p = codexHookPaths()
+  return codexState(p, codexTarget(p))
+}
+
+/** The collector's port is known (launch, or a restart on a new port, R31): point the installed entries' curlrc at it. */
+function writeCodexCurlrc(): void {
+  if (demo || port === null || codexStatus().state !== 'installed') return
+  writeCurlrc(codexHookPaths().curlrc, port, hookToken()).catch((e: unknown) => console.error(`[codex] curlrc: ${e instanceof Error ? e.message : String(e)}`))
+}
+
+const DEMO_OFF = 'Turn demo data off first.'
+
+function onCodexPreview(on: boolean): HooksPreview {
+  const p = codexHookPaths()
+  return demo ? { ok: false, path: p.settings, error: DEMO_OFF } : previewCodex(p, on, codexTarget(p))
+}
+
+async function onCodexInstall(): Promise<HooksResult> {
+  if (demo || port === null) return { ok: false, error: demo ? DEMO_OFF : NOT_READY }
+  const p = codexHookPaths()
+  return installCodex(p, codexTarget(p), { port, token: hookToken() })
+}
+
+const onCodexUninstall = (): HooksResult => (demo ? { ok: false, error: DEMO_OFF } : uninstallCodex(codexHookPaths()))
 
 /** ADR-0006: one click answers one held request. Only our page reaches this, and only through `handle`. */
 async function onDecide(id: unknown, verdict: unknown): Promise<ActionResult> {
@@ -394,6 +431,7 @@ function onCollectorMessage(m: FromCollector): void {
     updateConfig(configFile(), { collectorPort: m.port })
     port = m.port
     installIfConsented()
+    writeCodexCurlrc()
     refreshStatus()
   } else if (m.type === 'snapshot') {
     latest = m.snapshot
@@ -493,6 +531,11 @@ function start(): void {
   handle(IPC.previewUninstall, () => previewUninstall(hookPaths()))
   handle(IPC.install, (_e, on) => onInstall(on))
   handle(IPC.uninstall, onUninstall)
+  handle(IPC.codexHooks, codexStatus)
+  handle(IPC.codexPreviewInstall, () => onCodexPreview(true))
+  handle(IPC.codexPreviewUninstall, () => onCodexPreview(false))
+  handle(IPC.codexInstall, onCodexInstall)
+  handle(IPC.codexUninstall, onCodexUninstall)
   handle(IPC.detail, (_e, id) => detail(SessionId.parse(id)))
   handle(IPC.history, () => history())
   handle(IPC.act, async (_e, action, id) => {

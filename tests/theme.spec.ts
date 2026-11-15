@@ -20,7 +20,7 @@ let dirs: string[] = []
 function appEnv(userData: string, seed?: 'light' | 'dark'): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !key.startsWith('CLAUDE') && key !== 'AGENTDECK_THEME') env[key] = value
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData, ...(seed && { AGENTDECK_THEME: seed }) }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData, CODEX_HOME: `${userData}/codex`, ...(seed && { AGENTDECK_THEME: seed }) }
 }
 
 function freshUserData(): string {

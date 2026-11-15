@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { Session, Status, Surface } from '@shared/snapshot'
+import { providerOf, type Session, type Status, type Surface } from '@shared/snapshot'
 import { projectName } from '@shared/paths'
 import { ulid, type AgentEvent } from './events'
 
@@ -48,8 +48,8 @@ export interface SessionState {
   activity: string
   tasks: Record<string, boolean>
   waitingSince: number | null
-  /** The agent whose permission request is open (STATE_MACHINE § 3 P1 stand-in until M3's attention engine). */
-  waitingOn: { agentId: string | null } | null
+  /** The agent whose permission request is open (STATE_MACHINE § 3 P1 stand-in until M3's attention engine), and for which tool. */
+  waitingOn: { agentId: string | null; toolName?: string | null } | null
   /** What opened the current turn; synthetic `<task-notification>` turns never count as finished (D-010). */
   turn: 'prompt' | 'notified' | null
   workingSince: number | null
@@ -59,6 +59,10 @@ export interface SessionState {
   poll?: Record<string, unknown> | null
   /** The hook window held `poll` back; it is applied once the window has passed (duePoll). Absent in pre-M2 rows. */
   pollPending?: boolean
+  /** The model another CLI reported (ADR-0014); Claude Code sessions leave it out. */
+  model?: string
+  /** Calls that already finished, newest last: an async Codex Post can arrive before its Pre, which must then not open it again. */
+  recent?: string[]
 }
 
 export interface Reduced {
@@ -71,7 +75,21 @@ export interface Reduced {
   file: { path: string; tool: string } | null
 }
 
+const RECENT_MAX = 16
+const MODEL_MAX = 80
+
 const str = (o: Record<string, unknown>, k: string): string | null => (typeof o[k] === 'string' ? (o[k] as string) : null)
+
+/**
+ * Codex runs its hooks in the background (ADR-0014), so a request's own PreToolUse can land after the PermissionRequest
+ * that Codex sent right behind it. That one is no answer to the request; nor is session-start meta. Claude Code sends its
+ * hooks in order, so for it every later event of the agent is one (S4).
+ */
+export function answersWait(sessionId: string, waitingTool: string | null | undefined, ev: Pick<AgentEvent, 'kind' | 'toolName'>): boolean {
+  if (ev.kind === 'notification' || ev.kind === 'permission.requested') return false
+  if (providerOf(sessionId) === 'claude') return true
+  return ev.kind !== 'session.meta' && !(ev.kind === 'tool.started' && ev.toolName === waitingTool)
+}
 const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 
@@ -198,9 +216,11 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
 
   if (ev.source === 'hook') {
     s = { ...s, hookAt: ev.ts, ended: ev.kind === 'session.ended' ? s.ended : false }
+    const model = str(ev.payload, 'model')
+    if (model && providerOf(s.id) !== 'claude') s = { ...s, model: model.slice(0, MODEL_MAX) }
     if (ev.cwd && !s.cwd) s = { ...s, cwd: ev.cwd, name: s.named ? s.name : projectName(ev.cwd) }
     // Any later event of the agent we were waiting on, except a notification, means the request was answered.
-    if (s.waitingOn && s.waitingOn.agentId === ev.agentId && ev.kind !== 'notification' && ev.kind !== 'permission.requested') {
+    if (s.waitingOn && s.waitingOn.agentId === ev.agentId && answersWait(s.id, s.waitingOn.toolName, ev)) {
       s = { ...s, waitingOn: null }
       if (s.status === 'needs_you') setStatus('working')
     }
@@ -218,15 +238,18 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
       setStatus('working')
       break
     case 'tool.started': {
-      if (ev.toolUseId && ev.toolName && !s.inflight.some((t) => t.toolUseId === ev.toolUseId)) {
+      if (ev.toolUseId && ev.toolName && !s.inflight.some((t) => t.toolUseId === ev.toolUseId) && !s.recent?.includes(ev.toolUseId)) {
         const call: Inflight = {
           toolUseId: ev.toolUseId, agentId: ev.agentId, toolName: ev.toolName, input: p.tool_input, summary: ev.summary, startedAt: ev.ts
         }
         s = { ...s, inflight: [...s.inflight, call] }
       }
       if (main) {
-        s = { ...s, activity: ev.summary }
-        if (s.status !== 'needs_you') setStatus('working')
+        // Still waiting (a late Codex Pre of the very call it asks about): the row keeps saying what it waits for.
+        if (s.status !== 'needs_you') {
+          s = { ...s, activity: ev.summary }
+          setStatus('working')
+        }
       } else {
         s = { ...s, agents: s.agents.map((a) => (a.id === ev.agentId ? { ...a, activity: ev.summary } : a)) }
       }
@@ -235,13 +258,14 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
     case 'tool.finished':
     case 'tool.failed': {
       s = { ...s, inflight: s.inflight.filter((t) => t.toolUseId !== ev.toolUseId) }
+      if (ev.toolUseId && providerOf(s.id) !== 'claude') s = { ...s, recent: [...(s.recent ?? []), ev.toolUseId].slice(-RECENT_MAX) }
       const path = str(obj(p.tool_input), 'file_path') ?? str(obj(p.tool_input), 'notebook_path')
       if (ev.kind === 'tool.finished' && ev.toolName && EDIT_TOOLS.has(ev.toolName) && path) out.file = { path, tool: ev.toolName }
       break
     }
     case 'permission.requested': {
       const call = s.inflight.find((t) => t.toolUseId === ev.toolUseId)
-      s = { ...s, waitingOn: { agentId: ev.agentId } }
+      s = { ...s, waitingOn: { agentId: ev.agentId, toolName: ev.toolName } }
       if (main || s.status === 'working') s = { ...s, activity: waitingText(call?.summary ?? null) }
       setStatus('needs_you')
       break
@@ -254,6 +278,16 @@ export function reduceSession(prev: SessionState | undefined, ev: AgentEvent): R
       s = { ...s, turn: null, activity: 'Finished' }
       setStatus('done')
       break
+    case 'turn.interrupted':
+      if (!main) break
+      s = { ...s, inflight: s.inflight.filter((t) => t.agentId !== null), turn: null, activity: 'Interrupted' }
+      setStatus('idle')
+      break
+    case 'session.meta': {
+      const pid = p.agentdeck_pid
+      if (typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0) s = { ...s, pid }
+      break
+    }
     case 'turn.failed':
       if (!main) break
       s = { ...s, inflight: s.inflight.filter((t) => t.agentId !== null), turn: null, activity: `Stopped: ${str(p, 'error') ?? 'error'}` }
@@ -387,6 +421,8 @@ export function toSession(s: SessionState): Session {
     plan: ids.length ? { done, total: ids.length } : null,
     waitingSince: s.waitingSince,
     ...(s.pid ? { pid: s.pid } : {}),
+    ...(providerOf(s.id) !== 'claude' && { provider: providerOf(s.id) }),
+    ...(s.model && { model: s.model }),
     subagents: s.agents.map((a) => ({ id: a.id, agentType: a.agentType, task: a.task, activity: a.activity, startedAt: a.startedAt }))
   }
 }

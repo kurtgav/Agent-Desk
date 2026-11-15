@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FolderClosed, PanelRight, Square } from 'lucide-react'
 import { ALIAS_MAX } from '@shared/session-meta'
 import type { RoleSummary } from '@shared/roles'
+import { PROVIDER_NAME } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { sessionAction } from '@/lib/act'
 import type { SessionEntry } from '@/lib/sessionList'
@@ -105,6 +106,12 @@ export function SessionHeader({ entry, role }: { entry: SessionEntry; role: Role
           </h2>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Chips entry={entry} role={role} />
+            {session.provider && session.provider !== 'claude' && (
+              <span className="inline-flex h-6 max-w-48 flex-none items-center rounded-full bg-well px-2 text-[12px] text-muted" title={`Started in ${PROVIDER_NAME[session.provider]}${session.model ? `, with ${session.model}` : ''}`}>
+                <span className="sr-only">Started in </span>
+                <span className="truncate">{[PROVIDER_NAME[session.provider], session.model].filter(Boolean).join(' · ')}</span>
+              </span>
+            )}
             <StatusPill status={session.status} />
             {entry.origin === 'watching' && <span className="text-[12px] text-muted">Watching · {SURFACE[session.surface]}</span>}
             {cost && (

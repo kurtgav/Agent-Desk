@@ -50,6 +50,15 @@ export type HooksPreview =
 
 export type HooksResult = { ok: true } | { ok: false; error: string }
 
+/** ADR-0014: AgentDeck's command hooks in Codex CLI's hooks.json. `absent`: this PC has no Codex folder, so nothing is offered. */
+export interface CodexHooks {
+  state: HooksState | 'absent'
+  /** Why `error`, in plain words. */
+  error: string | null
+  /** The Codex folder: CODEX_HOME, else ~/.codex. */
+  home: string
+}
+
 export type PauseChoice = 'hour' | 'tomorrow'
 
 /** Session drawer actions (UI_MAP § Session drawer). Main looks the session up itself; the renderer sends only its id. */
@@ -131,6 +140,13 @@ export interface AgentDeckBridge {
   /** Writes settings.json; the renderer calls these only after the user confirmed the preview's diff. */
   installHooks(remoteApprovals: boolean): Promise<HooksResult>
   uninstallHooks(): Promise<HooksResult>
+  /** Where Codex CLI's hooks stand (ADR-0014). They stay in hooks.json while AgentDeck is closed; only the Settings row or the uninstaller removes them. */
+  getCodexHooks(): Promise<CodexHooks>
+  previewCodexInstall(): Promise<HooksPreview>
+  previewCodexUninstall(): Promise<HooksPreview>
+  /** Writes hooks.json (and the curlrc its commands read); the renderer calls these only after the user confirmed the preview's diff. */
+  installCodexHooks(): Promise<HooksResult>
+  uninstallCodexHooks(): Promise<HooksResult>
   /** Answers one held permission request. Fails when it no longer waits (time ran out, or it was answered elsewhere). */
   decide(itemId: string, verdict: Verdict): Promise<ActionResult>
   /** The drawer's data, or null when the collector doesn't know the session (or isn't running). */
@@ -257,6 +273,11 @@ export const IPC = {
   previewUninstall: 'hooks:preview-uninstall',
   install: 'hooks:install',
   uninstall: 'hooks:uninstall',
+  codexHooks: 'codex:hooks',
+  codexPreviewInstall: 'codex:preview-install',
+  codexPreviewUninstall: 'codex:preview-uninstall',
+  codexInstall: 'codex:install',
+  codexUninstall: 'codex:uninstall',
   detail: 'session:detail',
   history: 'history:get',
   act: 'session:act',

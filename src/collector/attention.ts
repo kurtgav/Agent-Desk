@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { ulid, type AgentEvent } from './events'
 import { code, displayPath } from './normalize'
 import { cap } from './redact'
-import type { SessionState } from './reduce'
+import { answersWait, type SessionState } from './reduce'
 
 /**
  * The attention engine (ADR-0013, STATE_MACHINE § 3): the only producer of "needs you" items. Pure:
@@ -236,8 +236,9 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
   if (ev.source === 'hook') {
     close(unstuck, 'hook')
     if (ev.kind !== 'notification') {
-      // Any later event of the same agent means its prompt was answered (S4); a Post of the same call says how.
-      close((i) => i.priority === 1 && i.source !== 'poll' && i.agentId === ev.agentId, 'hook')
+      // Any later event of the same agent means its prompt was answered (S4); a Post of the same call says how. A late
+      // Codex Pre of the call it asks about is no answer (reduce answersWait).
+      close((i) => i.priority === 1 && i.source !== 'poll' && i.agentId === ev.agentId && (ev.kind === 'permission.requested' || answersWait(sid, i.toolName, ev)), 'hook')
     }
     if (ev.toolUseId && (ev.kind === 'tool.finished' || ev.kind === 'tool.failed')) close((i) => i.toolUseId === ev.toolUseId, 'hook')
   }

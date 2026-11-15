@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import type { Surface } from '@shared/snapshot'
+import { providerOf, type Surface } from '@shared/snapshot'
 import { ulid, type AgentEvent } from './events'
 import { isDesktopPath, run, system32, type RunResult } from './cli'
 import { cap, maskSecrets } from './redact'
+import type { SessionState } from './reduce'
 
 /** D-005 cadence. The 1 s "P1 open" rate arrives with the attention engine (M3). */
 export const VISIBLE_MS = 3_000
@@ -232,4 +233,31 @@ export class Poller {
     this.deps.emit(events)
     return true
   }
+}
+
+/** Whether a process exists: signal 0 checks without sending anything; EPERM means it exists but is not ours to signal. */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Other CLIs have no session list to poll (ADR-0014): a live session whose process is gone has ended. Sessions without a
+ * pid wait for their SessionEnd, or for the stall rule. shortcut: a pid the OS hands to a new process right away reads as
+ * still alive; ask for the exe path (exePaths) if that ever shows.
+ */
+export function vanished(sessions: Iterable<SessionState>, now: number, alive: (pid: number) => boolean = processAlive): AgentEvent[] {
+  const out: AgentEvent[] = []
+  for (const s of sessions) {
+    if (s.ended || !s.pid || providerOf(s.id) === 'claude' || alive(s.pid)) continue
+    out.push({
+      id: ulid(now), ts: now, source: 'agentdeck', sessionId: s.id, agentId: null, parentAgentId: null, agentType: null, kind: 'session.gone',
+      toolName: null, toolUseId: null, summary: 'Session ended', payload: { pid: s.pid }, cwd: null, dedupeKey: null
+    })
+  }
+  return out
 }

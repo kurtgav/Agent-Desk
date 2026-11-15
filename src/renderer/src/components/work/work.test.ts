@@ -47,7 +47,7 @@ describe('Tasks page (demo data)', () => {
     expect(html).toContain('aria-labelledby="lane-doing"')
     expect(html).toContain('aria-labelledby="lane-needs"')
     // Waiting on you: stripe-webhooks and booking-form (approvals), the portal task's question, invoice-pdf (failed).
-    expect(words).toMatch(/Today 4 to do 3 in progress \(2 running\) 4 waiting on you 2 done/)
+    expect(words).toMatch(/Today 4 to do 4 in progress \(3 running\) 4 waiting on you 2 done/)
     expect(words).toMatch(/Waiting on you 4 items .*Question.*Approval.*Failed/)
   })
   it('puts tasks, agent sessions and linked status in the lanes', () => {

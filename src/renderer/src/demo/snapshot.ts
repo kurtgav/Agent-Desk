@@ -106,6 +106,12 @@ export function demoSnapshot(now: number): Snapshot {
       {
         id: 's-docs', bgId: null, name: 'release-notes', cwd: PATHS.deck, surface: 'cli', status: 'idle',
         startedAt: ago(400), lastEventAt: ago(330), activity: 'Idle', plan: null, waitingSince: null, subagents: []
+      },
+      {
+        // A session in another agent CLI, watched through its hooks (ADR-0014).
+        id: 'codex:019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50', bgId: null, name: 'invoice-rounding', cwd: PATHS.billing, surface: 'cli',
+        status: 'working', startedAt: ago(9), lastEventAt: ago(1), activity: 'Running `npm test -- invoice`', plan: null,
+        waitingSince: null, subagents: [], provider: 'codex', model: 'gpt-5.6-terra'
       }
     ],
     attention: [

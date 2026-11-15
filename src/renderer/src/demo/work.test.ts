@@ -27,9 +27,9 @@ describe('demo tasks', () => {
   })
   it('fill all four lanes, with live status on the linked cards and agents beside the tasks', () => {
     const lanes = buildLanes(tasks, snapshot.sessions, NOW, snapshot.attention)
-    expect([lanes.todo.length, lanes.doing.length, lanes.needs.length, lanes.done.length]).toEqual([4, 3, 4, 2])
+    expect([lanes.todo.length, lanes.doing.length, lanes.needs.length, lanes.done.length]).toEqual([4, 4, 4, 2])
     expect(lanes.doing.every((i) => i.session?.status !== 'needs_you')).toBe(true)
-    expect(lanes.doing.filter((i) => i.kind === 'agent').map((i) => i.session.name)).toEqual(['agentdeck-ui'])
+    expect(lanes.doing.filter((i) => i.kind === 'agent').map((i) => i.session.name)).toEqual(['agentdeck-ui', 'invoice-rounding'])
     expect(lanes.needs.some((i) => i.kind === 'task' && i.reason === 'question')).toBe(true)
     expect(lanes.needs.filter((i) => i.kind === 'agent').map((i) => i.session.name).sort()).toEqual(['booking-form', 'invoice-pdf', 'stripe-webhooks'])
   })

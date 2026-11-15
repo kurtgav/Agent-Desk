@@ -18,12 +18,13 @@ export const removeDir = (dir: string): void => rmSync(dir, { recursive: true, f
 
 /**
  * This machine runs inside Claude Code; none of its CLAUDE* vars may leak into the app. The app runs live but must not
- * poll the real sessions (AGENTDECK_POLL=0), and its Claude config dir is the temp profile.
+ * poll the real sessions (AGENTDECK_POLL=0), and its Claude config dir is the temp profile. CODEX_HOME is a folder in it
+ * that does not exist, so the real `~/.codex/hooks.json` is never read or edited (ADR-0014).
  */
 export function isolatedEnv(userData: string, configDir = userData): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: configDir }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: configDir, CODEX_HOME: `${userData}/codex` }
 }
 
 /** Apps started by a spec, closed (and their profiles removed) by `cleanup`. */

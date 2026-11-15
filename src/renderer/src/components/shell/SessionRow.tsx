@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PROVIDER_MARK, PROVIDER_NAME } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { shortAgo, type SessionEntry } from '@/lib/sessionList'
 import { MoreButton, SessionMenu } from '../session-menu/SessionMenu'
@@ -26,6 +27,8 @@ export function SessionRow({ entry, current, now, row, tabIndex }: Props) {
   const [hot, setHot] = useState(false)
   const { session } = entry
   const where = entry.project || 'No folder'
+  // Another agent CLI (ADR-0014): a plain monogram after the name; which one, and its model, are in the tooltip.
+  const cli = session.provider && session.provider !== 'claude' ? [PROVIDER_NAME[session.provider], session.model].filter(Boolean).join(' · ') : ''
   return (
     <SessionMenu session={session}>
       <li
@@ -43,7 +46,7 @@ export function SessionRow({ entry, current, now, row, tabIndex }: Props) {
           tabIndex={tabIndex}
           aria-current={current ? 'page' : undefined}
           onClick={() => open(entry.key)}
-          title={`${entry.name} · ${where}${entry.origin === 'watching' ? ' · started elsewhere, watched here' : ''}`}
+          title={`${entry.name} · ${where}${cli ? ` · ${cli}` : ''}${entry.origin === 'watching' ? ' · started elsewhere, watched here' : ''}`}
           className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <span className="grid size-4 flex-none place-items-center">
@@ -52,7 +55,13 @@ export function SessionRow({ entry, current, now, row, tabIndex }: Props) {
           <span className={cn('min-w-0 flex-1 truncate text-[14px] leading-5', entry.unread ? 'font-semibold text-ink' : 'text-ink/80')}>
             {entry.name}
             {entry.unread && <span className="sr-only"> (unread)</span>}
+            {cli && <span className="sr-only"> ({cli})</span>}
           </span>
+          {cli && (
+            <span aria-hidden className="flex-none text-[12px] text-muted">
+              {PROVIDER_MARK[session.provider!]}
+            </span>
+          )}
           <span className={cn('w-7 flex-none pr-1 text-right text-[12px] tabular-nums text-muted', hot && 'invisible')}>{shortAgo(entry.at, now)}</span>
         </button>
         {/* Only the row you point at or have focus on carries a ⋯ button, so a long list is not a column of extra tab stops. */}

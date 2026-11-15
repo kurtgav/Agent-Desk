@@ -21,7 +21,7 @@ function freshUserData(config: Record<string, unknown> = {}): string {
 function appEnv(userData: string): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !key.startsWith('CLAUDE')) env[key] = value
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData, CODEX_HOME: `${userData}/codex` }
 }
 
 async function open(config: Record<string, unknown> = {}): Promise<{ app: ElectronApplication; page: Page; userData: string }> {

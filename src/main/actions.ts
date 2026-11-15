@@ -4,7 +4,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ActionResult, LogsResult, OpenTargets, SessionAction } from '@shared/bridge'
 import { NOT_DELETABLE } from '@shared/session-meta'
-import type { Session } from '@shared/snapshot'
+import { RESUME_PATTERN } from '@shared/console'
+import { PROVIDER_NAME, providerOf, type Session } from '@shared/snapshot'
 import { cleanEnv, launch, run, system32, which } from '../collector/cli'
 import { focusWindowOf, type FocusResult } from './focus-window'
 
@@ -33,6 +34,8 @@ const fail = (error: string): ActionResult => ({ ok: false, error })
 const done = (err: string | null): ActionResult => (err === null ? { ok: true } : fail(err))
 export const NO_CLI = 'AgentDeck could not find the Claude Code CLI (claude), so it can not run this.'
 const NOT_BG = 'Only background sessions (claude --bg) can be attached, stopped or read with claude logs.'
+const NO_RESUME = 'This session id is not one AgentDeck can put in a command.'
+const FOLDER_ACTIONS = new Set<SessionAction>(['open-folder', 'open-cursor', 'open-terminal', 'open-explorer'])
 const NO_FOLDER = 'The session folder is no longer there.'
 
 /** CSI, OSC, charset (`ESC ( B`) and two-byte escapes: `claude logs` prints the raw TUI screen (S7). */
@@ -213,11 +216,20 @@ export async function deleteBackground(s: Session, deps: ActionDeps): Promise<Ac
 
 /** UI_MAP § Session drawer. Background-only actions refuse other sessions instead of guessing. */
 export async function act(action: SessionAction, s: Session, deps: ActionDeps): Promise<ActionResult> {
+  const provider = providerOf(s.id)
   if (action === 'copy-resume') {
-    deps.copy(`claude --resume ${s.id}`)
+    if (provider === 'claude') deps.copy(`claude --resume ${s.id}`)
+    else {
+      // The id came in a hook body and ends up pasted into a terminal: only a plain one is copied (`codex resume --help`).
+      const id = s.id.slice(provider.length + 1)
+      if (!RESUME_PATTERN.test(id)) return fail(NO_RESUME)
+      deps.copy(`${provider} resume ${id}`)
+    }
     return { ok: true }
   }
   if (action === 'focus-terminal') return focusTerminal(s, deps.focus ?? ((pid) => focusWindowOf(pid)))
+  // Folders and the terminal work for any CLI; the rest drive the claude CLI (ADR-0014).
+  if (provider !== 'claude' && !FOLDER_ACTIONS.has(action)) return fail(`Only Claude Code sessions can do that. This one runs in ${PROVIDER_NAME[provider]}.`)
   if (action === 'delete-background') return deleteBackground(s, deps)
   const platform = deps.platform ?? process.platform
   const cwd = await folder(s.cwd)

@@ -134,10 +134,10 @@ describe('selectors on the demo', () => {
     ])
   })
   it('lists working sessions before the ones waiting on you', () => {
-    expect(running(s).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'portal-migration', 'booking-form', 'stripe-webhooks'])
+    expect(running(s).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'invoice-rounding', 'portal-migration', 'booking-form', 'stripe-webhooks'])
   })
   it('lists recent sessions and projects', () => {
-    expect(recentSessions(s, 3).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'stripe-webhooks'])
+    expect(recentSessions(s, 3).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'invoice-rounding'])
     expect(recentProjects(s, 5).map((p) => p.name)).toEqual([
       'agentdeck', 'thirdcode-web', 'billing-api', 'harbor-dental-site', 'northwind-portal'
     ])

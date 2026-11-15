@@ -206,6 +206,14 @@ describe('Open in ▸', () => {
   it('a Claude Desktop session has no terminal to go to', () => {
     expect(byId(open({ session: session({ surface: 'desktop' }) }).entries, 'terminal').disabled).toBe(NOT_A_TERMINAL)
   })
+
+  it('a Codex CLI session keeps its folder and terminal, and says why it cannot fork or open in Claude Desktop', () => {
+    const s = session({ id: 'codex:019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50', provider: 'codex' })
+    const entries = open({ session: s }).entries
+    for (const id of ['vscode', 'explorer', 'terminal-here', 'terminal']) expect(byId(entries, id).disabled).toBeUndefined()
+    expect(byId(entries, 'desktop').disabled).toBe('This session runs in Codex CLI, not in Claude Desktop.')
+    expect(forkBlocked(s)).toBe('This session runs in Codex CLI, so it cannot be forked.')
+  })
 })
 
 describe('Move to section ▸', () => {

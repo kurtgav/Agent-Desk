@@ -1,7 +1,7 @@
 import type { SessionAction } from '@shared/bridge'
 import { RESUME_PATTERN } from '@shared/console'
 import { NOT_DELETABLE, type SessionMetaEntry, type SessionMetaPatch } from '@shared/session-meta'
-import type { Session } from '@shared/snapshot'
+import { PROVIDER_NAME, type Session } from '@shared/snapshot'
 import { isMac } from '@/lib/platform'
 
 /**
@@ -73,6 +73,8 @@ export const NO_SESSION_ID = "AgentDeck does not know this session's Claude Code
 export const ARCHIVED_RUNNING = 'Archived. It keeps running and still shows in Needs you when it needs you.'
 export const ARCHIVED = 'Archived. Find it under Sessions, with Archived set to Included.'
 export const NO_FOLDER = "AgentDeck does not know this session's folder."
+/** The CLI a session runs in when it is not Claude Code: AgentDeck only watches those (ADR-0014). */
+export const otherCli = (s: Session): string | null => (s.provider && s.provider !== 'claude' ? PROVIDER_NAME[s.provider] : null)
 export const NOT_A_TERMINAL = 'This session runs in Claude Desktop, not in a terminal.'
 
 const rule: MenuRule = { kind: 'rule' }
@@ -80,6 +82,8 @@ const heading = (text: string): MenuHeading => ({ kind: 'heading', text })
 
 /** Why a session can not be forked (the Console starts `claude --resume <id> --fork-session` in its folder), or null when it can. */
 export function forkBlocked(s: Session): string | null {
+  const cli = otherCli(s)
+  if (cli) return `This session runs in ${cli}, so it cannot be forked.`
   if (!RESUME_PATTERN.test(s.id)) return NO_SESSION_ID
   return s.cwd ? null : NO_FOLDER
 }
@@ -116,7 +120,7 @@ function openIn({ session: s, tools, do: d }: MenuInput): MenuSub {
     folder({ id: 'explorer', label: isMac() ? 'Finder' : 'Explorer', icon: 'explorer', run: () => d.action('open-explorer') }),
     folder({ id: 'terminal-here', label: 'Terminal here', icon: 'terminal', run: () => d.action('open-terminal') }),
     heading('Continue in'),
-    { kind: 'item', id: 'desktop', label: 'Claude Desktop', icon: 'desktop', run: () => d.action('open-desktop') },
+    { kind: 'item', id: 'desktop', label: 'Claude Desktop', icon: 'desktop', disabled: otherCli(s) ? `This session runs in ${otherCli(s)}, not in Claude Desktop.` : undefined, run: () => d.action('open-desktop') },
     terminal
   ]
   let n = 0

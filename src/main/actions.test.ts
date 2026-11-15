@@ -49,6 +49,17 @@ describe('session actions (UI_MAP § Session drawer)', () => {
     expect(d.copied).toEqual(['claude --resume 0b6e0d55-7c2e-4a39-9d0a-5d6a1f2c3b4e'])
   })
 
+  it('a Codex session copies codex resume, and is refused what only the claude CLI can do', async () => {
+    const d = deps(CLAUDE)
+    const codex = session({ id: 'codex:019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50', provider: 'codex' })
+    expect(await act('copy-resume', codex, d)).toEqual({ ok: true })
+    expect(d.copied).toEqual(['codex resume 019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50'])
+    expect(await act('copy-resume', session({ id: 'codex:--help; rm -rf ~' }), d)).toMatchObject({ ok: false })
+    expect(await act('open-desktop', codex, d)).toMatchObject({ ok: false, error: expect.stringMatching(/Codex CLI/) })
+    expect(await act('stop', { ...codex, bgId: 'abc123' }, d)).toMatchObject({ ok: false })
+    expect(d.copied).toHaveLength(1)
+  })
+
   it('refuses Attach, Stop and logs for a session that is not a background one, without running anything', async () => {
     const d = deps(CLAUDE)
     expect(await act('attach', session(), d)).toMatchObject({ ok: false, error: expect.stringMatching(/background/) })

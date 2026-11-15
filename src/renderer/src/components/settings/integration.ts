@@ -1,4 +1,4 @@
-import type { AppStatus, RemoteApprovals } from '@shared/bridge'
+import type { AppStatus, CodexHooks, RemoteApprovals } from '@shared/bridge'
 
 export interface HooksSummary {
   ok: boolean
@@ -14,6 +14,15 @@ export function hooksSummary(s: AppStatus): HooksSummary {
   if (s.conflicts.length > 0) return { ok: false, label: 'Hooks missing', detail: s.conflicts[0]! }
   if (s.hooks === 'missing') return { ok: false, label: 'Hooks missing', detail: 'Sessions do not report to AgentDeck yet. Manage hooks to install them.' }
   return { ok: true, label: 'Live', detail: 'Your sessions report to AgentDeck as they work.' }
+}
+
+/** The Codex CLI row (ADR-0014), in the same words. `absent` gets no verdict: the section shows the label as a muted word and offers nothing. */
+export function codexSummary(c: CodexHooks): HooksSummary {
+  // The path in backticks: the row renders it as code (Inline).
+  if (c.state === 'absent') return { ok: false, label: 'Not found', detail: `AgentDeck found no Codex CLI folder at \`${c.home}\`.` }
+  if (c.state === 'error') return { ok: false, label: 'Hooks missing', detail: c.error ?? "AgentDeck can't read your Codex CLI hooks.json." }
+  if (c.state === 'missing') return { ok: false, label: 'Hooks missing', detail: 'Codex CLI sessions do not report to AgentDeck yet. Install hooks to connect them.' }
+  return { ok: true, label: 'Installed', detail: 'Your Codex CLI sessions report to AgentDeck as they work.' }
 }
 
 export function remoteSummary(ra: RemoteApprovals): string {

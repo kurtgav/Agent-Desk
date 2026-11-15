@@ -4,14 +4,14 @@ import type { Server } from 'node:http'
 import type { ActionResult, Verdict } from '@shared/bridge'
 import type { WorkReq, WorkRes } from '@shared/collector'
 import type { History, SessionDetail } from '@shared/detail'
-import type { Snapshot } from '@shared/snapshot'
+import { providerOf, type Snapshot } from '@shared/snapshot'
 import { DEFAULT_WEEKLY_BUDGET_USD, WEEKLY_BUDGET_MAX_USD } from '@shared/work'
 import { DEFAULT_STALL, type AttentionRecord, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
 import { resolveClaude, run } from './cli'
 import { Holds, faithfulPreview, type AuditRow } from './holds'
-import { normalizeHook } from './normalize'
-import { Poller, exePaths } from './poll'
+import { normalizeHook, type HookOrigin } from './normalize'
+import { Poller, exePaths, vanished } from './poll'
 import { TaskFollower, WORK_COALESCE_MS, statusesOf, touchesReport, trailing } from './follow'
 import { listen } from './server'
 import { Store } from './store'
@@ -202,14 +202,14 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
           ingest(store.duePolls(Date.now())) // after the fresh rows, which may already have settled them (D-058)
         }
       },
-      store.liveIds()
+      store.liveIds().filter((id) => providerOf(id) === 'claude') // only Claude Code's sessions are in its list
     )
   }
 
   /** One bad body must not take the rest of its batch down, or reach the uncaught-error path (security review LOW-5). */
-  const normalize = (x: { raw: string; at: number }): AgentEvent[] => {
+  const normalize = (x: Queued): AgentEvent[] => {
     try {
-      return [normalizeHook(x.raw, x.at)].filter((e): e is AgentEvent => e !== null)
+      return [normalizeHook(x.raw, x.at, x.origin)].filter((e): e is AgentEvent => e !== null)
     } catch (err) {
       o.onError(err)
       return []
@@ -217,7 +217,8 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
   }
 
   // Bodies queue up and drain on the next turn of the loop, after their 200s went out (ARCHITECTURE § ingest).
-  let queue: { raw: string; at: number }[] = []
+  type Queued = { raw: string; at: number; origin: HookOrigin }
+  let queue: Queued[] = []
   const drain = (): void => {
     const batch = queue
     if (!batch.length) return // a hold drained it already
@@ -291,10 +292,11 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     ;({ server, port } = await listen(
       {
         token: o.token,
-        onHook: (raw, at, gone) => {
-          const held = approvals.enabled ? hold(raw, at, gone) : null
+        onHook: (raw, at, gone, origin) => {
+          // Remote approvals answer Claude Code's requests only; another CLI's request goes to its terminal (ADR-0014).
+          const held = approvals.enabled && origin.provider === 'claude' ? hold(raw, at, gone) : null
           if (held) return held
-          queue.push({ raw, at })
+          queue.push({ raw, at, origin })
           if (queue.length === 1) setImmediate(drain)
         },
         onMetrics: metrics,
@@ -310,7 +312,11 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
   setReadLogs(o.readLogs === true)
   poller?.setFastUntil(store.fastPollUntil()) // items reloaded from the database
   const pruner = setInterval(prune, PRUNE_EVERY_MS)
-  const stallTimer = setInterval(() => guarded(() => store.tick(Date.now(), stallCfg)), STALL_TICK_MS)
+  const stallTimer = setInterval(() => {
+    guarded(() => store.tick(Date.now(), stallCfg))
+    const gone = vanished(store.eodLive().sessions.values(), Date.now()) // other CLIs: no list to poll, so their process says
+    if (gone.length) ingest(gone)
+  }, STALL_TICK_MS)
 
   return {
     port,

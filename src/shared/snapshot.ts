@@ -14,6 +14,15 @@ export type Status = z.infer<typeof Status>
 export const Surface = z.enum(['cli', 'desktop', 'vscode', 'background', 'sdk'])
 export type Surface = z.infer<typeof Surface>
 
+/** Agent CLIs AgentDeck watches (ADR-0014). */
+export const Provider = z.enum(['claude', 'codex'])
+export type Provider = z.infer<typeof Provider>
+export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex CLI' }
+/** A plain monogram for rows (never a vendor logo: D-145, D-170); Claude Code, the default, carries none. */
+export const PROVIDER_MARK: Record<Provider, string> = { claude: '', codex: 'CX' }
+/** The session id says whose it is: other CLIs' ids carry their name in front (collector/normalize sessionKey). */
+export const providerOf = (sessionId: string): Provider => (sessionId.startsWith('codex:') ? 'codex' : 'claude')
+
 export const Subagent = z.object({
   id: z.string(),
   agentType: z.string(),
@@ -41,7 +50,11 @@ export const Session = z.object({
   waitingSince: Ts.nullable(),
   /** The session's own process, when the poll or a hook told us: "Answer in terminal" walks up from it to the window that hosts it. */
   pid: z.number().int().positive().nullable().optional(),
-  subagents: z.array(Subagent)
+  subagents: z.array(Subagent),
+  /** The agent CLI that runs it (ADR-0014); absent = Claude Code, so older snapshots and demo data still parse. */
+  provider: Provider.optional(),
+  /** The model the CLI reported, as it named it (Codex sends one with every hook). */
+  model: z.string().max(80).optional()
 })
 export type Session = z.infer<typeof Session>
 

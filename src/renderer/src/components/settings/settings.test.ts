@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AppStatus } from '@shared/bridge'
 import type { AppSettings, Diagnostics } from '@shared/work'
 import { greeting, initialOf } from '@/lib/profile'
-import { hooksSummary, remoteSummary } from './integration'
+import { codexSummary, hooksSummary, remoteSummary } from './integration'
 import { applyPatch, kindOnly } from './patch'
 import { diagnosticsReport, formatBytes, homesIn, redact } from './report'
 import { fromMinutes, toMinutes } from './time'
@@ -125,6 +125,16 @@ describe('Integration summary', () => {
     // D-068: a conflict is Hooks missing, as on the Live chip.
     expect(hooksSummary({ ...base, conflicts: ['disableAllHooks is true.'] })).toEqual({ ok: false, label: 'Hooks missing', detail: 'disableAllHooks is true.' })
     expect(hooksSummary({ ...base, hooks: 'error', hooksError: 'Could not read x.' })).toMatchObject({ ok: false, detail: 'Could not read x.' })
+  })
+
+  it('reads Codex CLI hooks in the same words, and names the missing folder plainly', () => {
+    const home = 'C:\\Users\\dev\\.codex'
+    expect(codexSummary({ state: 'installed', error: null, home })).toMatchObject({ ok: true, label: 'Installed' })
+    expect(codexSummary({ state: 'missing', error: null, home })).toMatchObject({ ok: false, label: 'Hooks missing' })
+    expect(codexSummary({ state: 'error', error: 'hooks.json is not valid JSON (line 1, column 3)', home })).toMatchObject({ ok: false, detail: expect.stringContaining('not valid JSON') })
+    expect(codexSummary({ state: 'absent', error: null, home })).toEqual({ ok: false, label: 'Not found', detail: `AgentDeck found no Codex CLI folder at \`${home}\`.` })
+    // A read that failed in the bridge reads as the error row, in the same words.
+    expect(codexSummary({ state: 'error', error: null, home: '' }).detail).toBe("AgentDeck can't read your Codex CLI hooks.json.")
   })
 
   it('states the remote-approvals wait, or that the terminal asks as usual', () => {

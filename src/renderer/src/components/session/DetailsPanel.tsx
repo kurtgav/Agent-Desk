@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Circle, CircleCheck, X } from 'lucide-react'
 import { CONVERSATION_ID } from '@shared/console'
 import type { SessionDetail } from '@shared/detail'
+import { PROVIDER_NAME } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { openChangedFile } from '@/lib/act'
 import { ago, duration } from '@/lib/format'
@@ -106,9 +107,14 @@ function Usage({ entry }: { entry: SessionEntry }) {
   const view = useConsole((s) => (entry.conv ? s.convs[entry.conv] : undefined))
   const { session } = entry
   if (!view) {
+    const ran = duration(Math.max(0, session.lastEventAt - session.startedAt))
+    // The sidebar's week is Claude Code's alone (ADR-0014).
+    const other = session.provider && session.provider !== 'claude' ? PROVIDER_NAME[session.provider] : null
     return (
       <Quiet>
-        Claude Code does not tell AgentDeck the tokens or cost of a session started elsewhere. It has run for {duration(Math.max(0, session.lastEventAt - session.startedAt))}; the week's usage is in the sidebar.
+        {other
+          ? `${other} does not tell AgentDeck the tokens or cost of its sessions. It has run for ${ran}.`
+          : `Claude Code does not tell AgentDeck the tokens or cost of a session started elsewhere. It has run for ${ran}; the week's usage is in the sidebar.`}
       </Quiet>
     )
   }

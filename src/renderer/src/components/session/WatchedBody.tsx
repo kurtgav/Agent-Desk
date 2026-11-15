@@ -6,6 +6,7 @@ import { sessionAction } from '@/lib/act'
 import type { SessionEntry } from '@/lib/sessionList'
 import { useStickToBottom } from '../console/scroll'
 import { forkSession } from '../session-menu/fork'
+import { otherCli } from '../session-menu/model'
 import { Button, EmptyState, Hint, Skeleton } from '../ui'
 import { Timeline } from './Timeline'
 import { useDetail } from './useDetail'
@@ -39,19 +40,25 @@ export function WatchedDock({ entry }: { entry: SessionEntry }) {
   const { session } = entry
   const waiting = session.status === 'needs_you'
   const ended = session.status === 'done'
-  const canFork = session.cwd !== ''
+  // Another agent CLI (ADR-0014): AgentDeck only watches it, and a fork is a Claude Code session.
+  const other = otherCli(session)
+  const canFork = session.cwd !== '' && !other
+  const forkHint = canFork
+    ? 'Starts a copy of this session here. The original stays as it is.'
+    : other
+      ? `This session runs in ${other}, so it cannot be continued here.`
+      : "AgentDeck does not know this session's folder, so it cannot continue it."
+  const lead = waiting ? 'It is waiting for you.' : other ? `Started in ${other}.` : STARTED[session.surface]
+  const rest = other ? (ended ? 'It has finished.' : 'Reply there.') : ended ? 'It has finished. Continue here to pick it up as a copy.' : 'Reply there, or continue here to fork it into a new session.'
   return (
     <div className="flex-none border-t border-line bg-surface px-5 py-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-tile bg-well px-4 py-3">
         <p className="min-w-[24ch] flex-1 text-pretty text-[13px] leading-5">
-          <span className="font-medium">{waiting ? 'It is waiting for you.' : STARTED[session.surface]}</span>{' '}
-          <span className="text-muted">
-            {ended ? 'It has finished. Continue here to pick it up as a copy.' : 'Reply there, or continue here to fork it into a new session.'}
-          </span>
+          <span className="font-medium">{lead}</span> <span className="text-muted">{rest}</span>
         </p>
         <div className="flex flex-none items-center gap-2">
           <WindowButton entry={entry} />
-          <Hint label={canFork ? 'Starts a copy of this session here. The original stays as it is.' : "AgentDeck does not know this session's folder, so it can not continue it."}>
+          <Hint label={forkHint}>
             <Button aria-disabled={!canFork} onClick={() => canFork && forkSession(session, entry.name)}>
               <GitFork size={14} strokeWidth={1.75} aria-hidden />
               Continue here

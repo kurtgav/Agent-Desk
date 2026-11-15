@@ -1,4 +1,5 @@
-// ADR-0005: merge AgentDeck's HTTP hook entries into Claude Code's settings.json and strip them again.
+// ADR-0005: merge AgentDeck's HTTP hook entries into Claude Code's settings.json and strip them again. The same planner
+// serves Codex CLI's hooks.json (ADR-0014, codex-hooks.ts) through a HookSpec; Claude's spec is every default.
 // Pure: text in, text out. The fs side lives in settings-writer.ts.
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -70,6 +71,41 @@ function ourGroup(event: string, t: HookTarget): Json {
   return { hooks: [{ type: 'http', url: ourUrl(t.port), timeout, headers: { [TOKEN_HEADER]: t.token } }] }
 }
 
+/** One hooks file: how its entries of ours look. `T` is what they point at (settings.json: the collector's port and token). */
+export interface HookSpec<T> {
+  /** The file's name, in messages and the diff header. */
+  file: string
+  /** Backups are `<backup>-<stamp>.json`, kept and rotated per file. */
+  backup: string
+  /** The events we write to, in order. */
+  events: readonly string[]
+  isOurs(entry: unknown): boolean
+  /** Our one group under `event`. */
+  group(event: string, target: T): Json
+  conflicts?(root: Json, target: T): string[]
+  /** Our other entries in the same file, left out when checking that nothing foreign changed (settings.json: ADR-0007's env). */
+  stripOther?(root: Json): Json
+  /** Whether the masked diff may show this JSON string literal as it is. */
+  shown(literal: string): boolean
+}
+
+/** What stripping, comparing and diffing need: no target. */
+export type HookFile = Pick<HookSpec<unknown>, 'file' | 'backup' | 'isOurs' | 'stripOther' | 'shown'>
+
+export const CLAUDE: HookSpec<HookTarget> = {
+  file: 'settings.json',
+  backup: 'settings',
+  events: HOOK_EVENTS,
+  isOurs,
+  group: ourGroup,
+  conflicts: (root, t) => conflicts(root, t.port),
+  stripOther: stripTelemetry,
+  shown: (s) => SHOWN.test(s)
+}
+
+/** Claude's spec as the default of a generic parameter; `NoInfer` on the target keeps a caller without a spec on HookTarget. */
+export const claudeSpec = <T>(): HookSpec<T> => CLAUDE as unknown as HookSpec<T>
+
 /** Hash-like string of the entry shape WITHOUT port and token (events + timeouts), used to decide when consent must be asked again. */
 export function shapeKey(target: Omit<HookTarget, 'port' | 'token'>): string {
   const groups = HOOK_EVENTS.map((e) => [e, ourGroup(e, { ...target, port: 0, token: '' })])
@@ -91,32 +127,32 @@ function where(body: string): string {
 /** Text to edit: none, or only whitespace (an editor's empty save), counts as `{}`. */
 const bodyOf = (text: string | null): string => (text === null || !text.replace(BOM, '').trim() ? '{}\n' : text.replace(BOM, ''))
 
-export function parse(text: string | null): Parsed {
+export function parse(text: string | null, file = 'settings.json'): Parsed {
   const body = bodyOf(text) // Windows PowerShell 5.1 `Out-File` writes a BOM
   let root: unknown
   try {
     root = JSON.parse(body)
   } catch {
     // Not the engine's message: it quotes the file around the error, and the file can hold API keys.
-    return { ok: false, error: `settings.json is not valid JSON${where(body)}` }
+    return { ok: false, error: `${file} is not valid JSON${where(body)}` }
   }
-  if (!isObj(root)) return { ok: false, error: 'settings.json is not a JSON object' }
+  if (!isObj(root)) return { ok: false, error: `${file} is not a JSON object` }
   if (root.hooks === undefined) return { ok: true, root }
-  if (!isObj(root.hooks)) return { ok: false, error: '"hooks" in settings.json is not an object' }
+  if (!isObj(root.hooks)) return { ok: false, error: `"hooks" in ${file} is not an object` }
   const bad = Object.entries(root.hooks).find(([, groups]) => !Array.isArray(groups))
-  return bad ? { ok: false, error: `"hooks.${bad[0]}" in settings.json is not an array` } : { ok: true, root }
+  return bad ? { ok: false, error: `"hooks.${bad[0]}" in ${file} is not an array` } : { ok: true, root }
 }
 
 /** Decides whether a container (an event array, or `hooks` when event is null) left empty is dropped. */
 type Prune = (event: string | null, emptiedByUs: boolean) => boolean
 const PRUNE_OURS: Prune = (_, byUs) => byUs
 // Install keeps the containers it refills, so they keep their place in the file.
-const PRUNE_REFILLED: Prune = (e, byUs) => byUs && e !== null && !HOOK_EVENTS.includes(e)
+const pruneRefilled = (events: readonly string[]): Prune => (e, byUs) => byUs && e !== null && !events.includes(e)
 // Comparison: an empty container carries no foreign content.
 const PRUNE_ALL: Prune = () => true
 
 /** Object form, for `foreignUnchanged`: an independent check of what the text edits below did. */
-function strip(root: Json, prune: Prune): Json {
+function strip(root: Json, prune: Prune, isOurs: (entry: unknown) => boolean): Json {
   if (!isObj(root.hooks)) return root
   const events = Object.entries(root.hooks).flatMap(([event, groups]): [string, unknown][] => {
     if (!Array.isArray(groups)) return [[event, groups]]
@@ -181,7 +217,7 @@ export function remove(text: string, path: JSONPath): string {
 const hooksOf = (text: string): Json => (JSON.parse(text) as { hooks: Json }).hooks
 
 /** Removes our hook entries (and groups and containers our removal emptied, as `prune` decides) by deleting their text. */
-function stripText(text: string, prune: Prune): string {
+function stripText(text: string, prune: Prune, isOurs: (entry: unknown) => boolean): string {
   const root = JSON.parse(text) as Json
   if (!isObj(root.hooks)) return text
   let out = text
@@ -203,10 +239,10 @@ function stripText(text: string, prune: Prune): string {
 }
 
 /** Appends our group to each event; new event keys go at the end of `hooks`, a new `hooks` at the end of the root. */
-function addText(text: string, t: HookTarget): string {
+function addText(text: string, events: readonly string[], group: (event: string) => Json): string {
   let out = isObj((JSON.parse(text) as Json).hooks) ? text : append(text, [], {}, 'hooks')
-  for (const e of HOOK_EVENTS) {
-    out = Array.isArray(hooksOf(out)[e]) ? append(out, ['hooks', e], ourGroup(e, t)) : append(out, ['hooks'], [ourGroup(e, t)], e)
+  for (const e of events) {
+    out = Array.isArray(hooksOf(out)[e]) ? append(out, ['hooks', e], group(e)) : append(out, ['hooks'], [group(e)], e)
   }
   return out
 }
@@ -220,21 +256,22 @@ export function plan(text: string | null, root: Json, edit: (body: string) => st
 }
 
 /** The masked unified diff a preview shows. Only previews build it: status checks run on every window focus. */
-export function planDiff(p: Extract<Plan, { ok: true }>): string {
-  return p.changed ? unifiedDiff(p.before ?? '', p.after) : ''
+export function planDiff(p: Extract<Plan, { ok: true }>, spec: HookFile = CLAUDE): string {
+  return p.changed ? unifiedDiff(p.before ?? '', p.after, spec) : ''
 }
 
 /** `text` is the current file content, or null when the file does not exist. */
-export function planInstall(text: string | null, target: HookTarget): Plan {
-  const parsed = parse(text)
+export function planInstall<T = HookTarget>(text: string | null, target: NoInfer<T>, spec: HookSpec<T> = claudeSpec<T>()): Plan {
+  const parsed = parse(text, spec.file)
   if (!parsed.ok) return parsed
-  return plan(text, parsed.root, (body) => addText(stripText(body, PRUNE_REFILLED), target), conflicts(parsed.root, target.port))
+  const edit = (body: string): string => addText(stripText(body, pruneRefilled(spec.events), spec.isOurs), spec.events, (e) => spec.group(e, target))
+  return plan(text, parsed.root, edit, spec.conflicts?.(parsed.root, target) ?? [])
 }
 
-export function planUninstall(text: string | null): Plan {
-  const parsed = parse(text)
+export function planUninstall(text: string | null, spec: HookFile = CLAUDE): Plan {
+  const parsed = parse(text, spec.file)
   if (!parsed.ok) return parsed
-  return plan(text, parsed.root, (body) => stripText(body, PRUNE_OURS), [])
+  return plan(text, parsed.root, (body) => stripText(body, PRUNE_OURS, spec.isOurs), [])
 }
 
 export type Inspection = { ok: true; installed: boolean; conflicts: string[] } | { ok: false; error: string }
@@ -244,31 +281,32 @@ export type Inspection = { ok: true; installed: boolean; conflicts: string[] } |
  * Order doesn't matter, so a group that `/hooks` added after ours still reads as installed (M3 code review).
  * Without one (no port yet): whether any of ours is there.
  */
-export function inspect(text: string | null, target: HookTarget | null): Inspection {
-  const parsed = parse(text)
+export function inspect<T = HookTarget>(text: string | null, target: NoInfer<T> | null, spec: HookSpec<T> = claudeSpec<T>()): Inspection {
+  const parsed = parse(text, spec.file)
   if (!parsed.ok) return parsed
   const hooks = isObj(parsed.root.hooks) ? parsed.root.hooks : {}
   const ours = (event: string): unknown[] => {
     const groups = hooks[event]
-    return (Array.isArray(groups) ? groups : []).flatMap((g: unknown) => (isObj(g) && Array.isArray(g.hooks) ? g.hooks : [])).filter(isOurs)
+    return (Array.isArray(groups) ? groups : []).flatMap((g: unknown) => (isObj(g) && Array.isArray(g.hooks) ? g.hooks : [])).filter(spec.isOurs)
   }
-  if (!target) return { ok: true, installed: Object.keys(hooks).some((e) => ours(e).length > 0), conflicts: [] }
+  if (target === null) return { ok: true, installed: Object.keys(hooks).some((e) => ours(e).length > 0), conflicts: [] }
   const exact = (e: string): boolean => {
     const found = ours(e)
-    return found.length === 1 && isDeepStrictEqual(found[0], (ourGroup(e, target).hooks as unknown[])[0])
+    return found.length === 1 && isDeepStrictEqual(found[0], (spec.group(e, target).hooks as unknown[])[0])
   }
-  const installed = HOOK_EVENTS.every(exact) && Object.keys(hooks).every((e) => HOOK_EVENTS.includes(e) || ours(e).length === 0)
-  return { ok: true, installed, conflicts: conflicts(parsed.root, target.port) }
+  const installed = spec.events.every(exact) && Object.keys(hooks).every((e) => spec.events.includes(e) || ours(e).length === 0)
+  return { ok: true, installed, conflicts: spec.conflicts?.(parsed.root, target) ?? [] }
 }
 
 /**
  * True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal
- * objects. Ours are the hook entries (ADR-0005) and the telemetry `env` entries (ADR-0007).
+ * objects. Ours are the hook entries (ADR-0005) and, in settings.json, the telemetry `env` entries (ADR-0007).
  */
-export function foreignUnchanged(before: string | null, after: string): boolean {
-  const a = parse(before)
-  const b = parse(after)
-  return a.ok && b.ok && isDeepStrictEqual(stripTelemetry(strip(a.root, PRUNE_ALL)), stripTelemetry(strip(b.root, PRUNE_ALL)))
+export function foreignUnchanged(before: string | null, after: string, spec: HookFile = CLAUDE): boolean {
+  const a = parse(before, spec.file)
+  const b = parse(after, spec.file)
+  const other = spec.stripOther ?? ((root: Json): Json => root)
+  return a.ok && b.ok && isDeepStrictEqual(other(strip(a.root, PRUNE_ALL, spec.isOurs)), other(strip(b.root, PRUNE_ALL, spec.isOurs)))
 }
 
 /** `*` matches any run of characters. Linear: the pattern comes from the user's file, so no regex to backtrack. */
@@ -336,12 +374,12 @@ const SHOWN = /^"(?:http|http:\/\/127\.0\.0\.1:\d+\/(?:hooks|v1\/metrics)|1|otlp
  * name no one (1, otlp, http/json, 10000, the loopback metrics URL). The tokens are hidden. Pattern masking missed
  * secrets in shapes it didn't know (M3 security review), and the token can sit on a line of its own.
  */
-const mask = (line: string): string => line.replace(JSON_STRING, (s, key?: string) => (key || SHOWN.test(s) ? s : '"•••"'))
+const mask = (line: string, shown: (literal: string) => boolean): string => line.replace(JSON_STRING, (s, key?: string) => (key || shown(s) ? s : '"•••"'))
 /** Lines of the old (skip '+') or new (skip '-') file covered by `ops`. */
 const span = (ops: Op[], skip: '+' | '-'): number => ops.filter(([o]) => o !== skip).length
 const range = (start: number, count: number): string => `${count > 0 ? start + 1 : start},${count}`
 
-function unifiedDiff(before: string, after: string): string {
+function unifiedDiff(before: string, after: string, spec: HookFile): string {
   const ops = lineOps(lines(before), lines(after))
   const hunks: [number, number][] = []
   ops.forEach(([o], k) => {
@@ -357,5 +395,5 @@ function unifiedDiff(before: string, after: string): string {
     const header = `@@ -${range(span(head, '+'), span(hunk, '+'))} +${range(span(head, '-'), span(hunk, '-'))} @@`
     return [header, ...hunk.map(([o, l]) => o + l)]
   })
-  return ['--- settings.json', '+++ settings.json (after)', ...body].map(mask).join('\n')
+  return [`--- ${spec.file}`, `+++ ${spec.file} (after)`, ...body].map((l) => mask(l, spec.shown)).join('\n')
 }

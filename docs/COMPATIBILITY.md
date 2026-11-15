@@ -88,6 +88,21 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 | Prices for the cost estimate (`usage-price.ts`): per model, input, 5-minute and 1-hour cache write, cache read and output per MTok; Claude Haiku 5.5 is priced by prompt size (up to or over 100,000 tokens); fast mode and US-only inference change the price, so those requests get no cost | platform.claude.com/docs/en/about-claude/pricing, read 2026-11-13 | **verified**: the table reproduces Claude Code's own `cost.usage` ($0.00139164) for a real claude-haiku-5-5 request, with cache writes at the 1-hour rate |
 | `CLAUDECODE` / `CLAUDE_CODE_CHILD_SESSION` hide nested sessions from `claude agents` | env-vars | docs |
 
+## Codex CLI
+Other agent CLIs are watched through their own hooks only (ADR-0014). Observed with Codex CLI **0.162.1** in a scratch `CODEX_HOME`, never the real one; bodies in `test/fixtures/hooks/codex-0.162.1/`.
+
+| Interface | What AgentDeck relies on | Source | Status |
+|---|---|---|---|
+| `~/.codex/hooks.json` | `{"hooks":{"<Event>":[{"matcher"?,"hooks":[{"type":"command","command","timeout"}]}]}}`; the only Codex file AgentDeck writes | Codex hooks docs | spike (run 1–4) |
+| Command handler | body on stdin; Windows runs `powershell.exe -NoProfile -Command "<cmd>"` whose parent is `codex.exe`; sh elsewhere | Codex hooks docs | spike on Windows; sh unverified |
+| Hook trust | each command trusted once in `/hooks`, keyed by its hash, so the command never holds the port or token | Codex hooks docs | spike |
+| Events | SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionEnd observed; PermissionRequest and Interrupt fixtures are shaped from the docs | Codex hooks docs | spike for six; **docs** for two |
+| `session_id`, `cwd`, `model`, `tool_name`, `tool_use_id`, `last_assistant_message` | session key, folder, model chip, tool pairing, last message | Codex hooks docs | spike |
+| `SessionEnd` / `Interrupt` timeout | capped at 3 s; a closed localhost port costs ~2.1 s on Windows, ~0.4 s with `--connect-timeout 0.3` | spike | spike |
+| exec mode | approval policy forced to `never`, so no PermissionRequest there | spike | spike |
+| `apply_patch` | `tool_input.command` holds whole file bodies; slimmed at ingest to `*** Add/Update/Delete File:` names and a size | spike | spike |
+| Resume | `codex resume <id>` | Codex CLI help | docs |
+
 ## macOS
 What the macOS build relies on that Windows does not. **CI** means the darwin branch runs in the unit tests on a `macos-latest` runner with the OS call faked; none of these rows has been observed on a real Mac yet.
 
