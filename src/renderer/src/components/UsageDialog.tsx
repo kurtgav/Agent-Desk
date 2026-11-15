@@ -111,19 +111,19 @@ export function UsageDialog({ kind = 'telemetry', mode, onClose, onDone }: { kin
               <p className="mt-4 text-[13px] leading-5">
                 File: <Code className="break-all">{preview.path}</Code>
               </p>
-              {preview.conflicts.length > 0 && (
-                <ul className="mt-3 flex flex-col gap-1 rounded-tile bg-[var(--needs-bg)] p-3 text-[13px] text-[var(--needs-ink)]">
-                  {preview.conflicts.map((c) => (
-                    <li key={c}>{c}</li>
-                  ))}
-                </ul>
-              )}
               {preview.changed && (
                 <p className="t-meta mt-1.5 text-muted">
                   A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. {kind === 'plan'
                     ? "Below, the values in your file and the path of AgentDeck's script are hidden; the keys show."
                     : "Below, the values already in your file and AgentDeck's token are hidden; the keys and AgentDeck's address show."}
                 </p>
+              )}
+              {preview.conflicts.length > 0 && (
+                <ul className="mt-3 flex flex-col gap-1 rounded-tile bg-[var(--needs-bg)] p-3 text-[13px] text-[var(--needs-ink)]">
+                  {preview.conflicts.map((c) => (
+                    <li key={c}>{c}</li>
+                  ))}
+                </ul>
               )}
               {preview.changed ? (
                 <pre role="region" tabIndex={0} aria-label="Changes to settings.json" className="mt-3 min-h-0 flex-1 overflow-auto rounded-tile bg-well py-2 font-mono text-[12px] leading-5">

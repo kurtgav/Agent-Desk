@@ -11,6 +11,7 @@ import { UserAvatar } from './UserAvatar'
 /** One of the plan's windows: "Session 16%  resets 2:10 PM" over a thin meter, as claude.ai's Settings › Usage writes it. */
 function PlanWindowLine({ label, w, day, className }: { label: string; w: PlanWindow; day?: boolean; className?: string }) {
   const pct = Math.round(w.usedPct)
+  const fill = Math.min(100, pct) // the bar and its value stop at full; the words keep the real figure, as the budget meter does
   const resets = `resets ${resetTime(w.resetsAt, day)}`
   return (
     <div className={className}>
@@ -25,11 +26,11 @@ function PlanWindowLine({ label, w, day, className }: { label: string; w: PlanWi
         aria-label={`${label} limit used`}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={pct}
+        aria-valuenow={fill}
         aria-valuetext={`${pct}% used, ${resets}`}
-        className="mt-1 h-1 overflow-hidden rounded-full bg-track"
+        className="mt-1.5 h-1 overflow-hidden rounded-full bg-track"
       >
-        <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-accent" style={{ width: `${fill}%` }} />
       </div>
     </div>
   )
@@ -43,12 +44,13 @@ function PlanLimitsBlock({ limits, usage }: { limits: PlanLimits; usage: UsageFi
   const asOf = resetTime(limits.at, new Date(limits.at).toDateString() !== new Date(now).toDateString())
   const detail = [
     `Your plan's limits, from Claude Code's status line${old ? `, as of ${asOf}` : ''}`,
-    ...(usage ? [`${usd(usage.weekCostUsd)} of ${usd(usage.weeklyBudgetUsd)} this week (API-equivalent estimate)`] : [])
+    ...(usage ? [`${usd(usage.weekCostUsd)} of ${usd(usage.weeklyBudgetUsd)} this week (API-equivalent estimate${usage.costPartial ? ', cost partly unknown' : ''})`] : [])
   ]
   return (
-    <div role="group" aria-label="Plan usage" title={detail.join('\n')} className="px-2">
+    <div role="group" aria-label="Usage, your plan's limits" title={detail.join('\n')} className="px-2">
       {limits.session && <PlanWindowLine label="Session" w={limits.session} />}
       {limits.week && <PlanWindowLine label="Week" w={limits.week} day className={limits.session ? 'mt-1.5' : undefined} />}
+      {/* Shown at every height: the only sign on screen that the figures are old. */}
       {old && <p className="t-meta mt-1 truncate tabular-nums text-muted">as of {asOf}</p>}
     </div>
   )
