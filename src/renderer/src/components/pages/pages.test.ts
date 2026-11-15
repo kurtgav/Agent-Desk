@@ -7,7 +7,7 @@ import { App } from '@/App'
 import { PAGE_TITLE } from './Page'
 
 const NOW = Date.UTC(2026, 10, 5, 14, 0)
-const PAGES: Page[] = ['home', 'sessions', 'files', 'activity', 'approvals', 'agents']
+const PAGES: Page[] = ['home', 'tasks', 'sessions', 'files', 'activity', 'approvals', 'report', 'roles', 'settings']
 
 beforeEach(() => {
   vi.stubGlobal('window', {})

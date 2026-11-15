@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { findNodeAtLocation, parseTree, type JSONPath, type Node, type ParseError } from 'jsonc-parser'
+import { stripTelemetry } from './claude-telemetry'
 
 /** SessionStart is excluded: HTTP hooks don't run there (D-004). */
 export const HOOK_EVENTS: readonly string[] = [
@@ -42,8 +43,8 @@ const OUR_URL = /^http:\/\/127\.0\.0\.1:\d+\/hooks$/
 const TIMEOUT_SEC = 2
 const CONTEXT = 2
 
-type Json = Record<string, unknown>
-const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
+export type Json = Record<string, unknown>
+export const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /** CLAUDE_CONFIG_DIR, else <home>/.claude, then settings.json */
 export function settingsPath(env: NodeJS.ProcessEnv, home: string): string {
@@ -75,7 +76,7 @@ export function shapeKey(target: Omit<HookTarget, 'port' | 'token'>): string {
   return createHash('sha256').update(JSON.stringify(groups)).digest('hex').slice(0, 16)
 }
 
-type Parsed = { ok: true; root: Json } | { ok: false; error: string }
+export type Parsed = { ok: true; root: Json } | { ok: false; error: string }
 
 /** " (line L, column C)" of the first syntax error, or "" if jsonc-parser finds none (it is laxer than JSON.parse). */
 function where(body: string): string {
@@ -90,7 +91,7 @@ function where(body: string): string {
 /** Text to edit: none, or only whitespace (an editor's empty save), counts as `{}`. */
 const bodyOf = (text: string | null): string => (text === null || !text.replace(BOM, '').trim() ? '{}\n' : text.replace(BOM, ''))
 
-function parse(text: string | null): Parsed {
+export function parse(text: string | null): Parsed {
   const body = bodyOf(text) // Windows PowerShell 5.1 `Out-File` writes a BOM
   let root: unknown
   try {
@@ -150,7 +151,7 @@ function indentAt(text: string, offset: number, unit: string): string {
 }
 
 /** Appends `value` (as `"key": value` in an object) after the container's last child, in the file's own style. */
-function append(text: string, path: JSONPath, value: unknown, key?: string): string {
+export function append(text: string, path: JSONPath, value: unknown, key?: string): string {
   const unit = /^([ \t]+)\S/m.exec(text)?.[1] ?? '  '
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const box = findNodeAtLocation(tree(text), path)!
@@ -165,7 +166,7 @@ function append(text: string, path: JSONPath, value: unknown, key?: string): str
 }
 
 /** Deletes the array item or object property at `path`, with the comma and whitespace that joined it to a sibling. */
-function remove(text: string, path: JSONPath): string {
+export function remove(text: string, path: JSONPath): string {
   const value = findNodeAtLocation(tree(text), path)!
   const node = value.parent?.type === 'property' ? value.parent : value
   const box = node.parent!
@@ -210,7 +211,7 @@ function addText(text: string, t: HookTarget): string {
   return out
 }
 
-function plan(text: string | null, root: Json, edit: (body: string) => string, conflicts: string[]): Plan {
+export function plan(text: string | null, root: Json, edit: (body: string) => string, conflicts: string[]): Plan {
   const bom = text !== null && BOM.test(text) ? '\uFEFF' : ''
   const edited = bom + edit(bodyOf(text))
   // Nothing to add or remove: keep the user's bytes, whatever their formatting.
@@ -260,11 +261,14 @@ export function inspect(text: string | null, target: HookTarget | null): Inspect
   return { ok: true, installed, conflicts: conflicts(parsed.root, target.port) }
 }
 
-/** True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal objects. */
+/**
+ * True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal
+ * objects. Ours are the hook entries (ADR-0005) and the telemetry `env` entries (ADR-0007).
+ */
 export function foreignUnchanged(before: string | null, after: string): boolean {
   const a = parse(before)
   const b = parse(after)
-  return a.ok && b.ok && isDeepStrictEqual(strip(a.root, PRUNE_ALL), strip(b.root, PRUNE_ALL))
+  return a.ok && b.ok && isDeepStrictEqual(stripTelemetry(strip(a.root, PRUNE_ALL)), stripTelemetry(strip(b.root, PRUNE_ALL)))
 }
 
 /** `*` matches any run of characters. Linear: the pattern comes from the user's file, so no regex to backtrack. */
@@ -326,9 +330,10 @@ function lineOps(a: string[], b: string[]): Op[] {
 }
 
 const JSON_STRING = /"(?:[^"\\]|\\.)*"(\s*:)?/g
-const SHOWN = /^"(?:http|http:\/\/127\.0\.0\.1:\d+\/hooks)"$/
+const SHOWN = /^"(?:http|http:\/\/127\.0\.0\.1:\d+\/(?:hooks|v1\/metrics)|1|otlp|http\/json|10000)"$/
 /**
- * Structure only: keys stay, every string value is hidden except our entry's type and URL. Pattern masking missed
+ * Structure only: keys stay, every string value is hidden except our entry's type and URL, and the telemetry values that
+ * name no one (1, otlp, http/json, 10000, the loopback metrics URL). The tokens are hidden. Pattern masking missed
  * secrets in shapes it didn't know (M3 security review), and the token can sit on a line of its own.
  */
 const mask = (line: string): string => line.replace(JSON_STRING, (s, key?: string) => (key || SHOWN.test(s) ? s : '"•••"'))

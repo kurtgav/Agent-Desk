@@ -1,13 +1,20 @@
 import { DatabaseSync } from 'node:sqlite'
 import type { History, PlanTask, SessionDetail } from '@shared/detail'
+import { dayKey } from '@shared/day'
 import { pathKey } from '@shared/paths'
-import { SNAPSHOT_FILES_MAX, SNAPSHOT_SESSIONS_MAX, type ChangedFile, type Snapshot } from '@shared/snapshot'
+import { SNAPSHOT_FILES_MAX, SNAPSHOT_SESSIONS_MAX, type ChangedFile, type Snapshot, type Usage } from '@shared/snapshot'
+import { DEFAULT_WEEKLY_BUDGET_USD } from '@shared/work'
 import {
   answer, attend, dismiss, emptyAttention, fastPollUntil, stall, toItem, type AttentionRecord, type AttentionState, type Attended, type StallConfig
 } from './attention'
 import type { AgentEvent } from './events'
 import type { AuditRow, HoldOutcome } from './holds'
 import { closeStale, correlate, duePoll, reduceSession, toSession, type SessionState } from './reduce'
+import { summarizeUsage, type UsagePoint, type UsageType } from './usage'
+import { summarizeLog } from './usage-log-summary'
+import { UsageLogStore } from './usage-log-store'
+import type { WatcherStatus } from './usage-log'
+import { WorkStore } from './work-store'
 
 /** ADR-0003. Each entry runs once, in order, inside one transaction; `user_version` records progress. */
 const MIGRATIONS = [
@@ -63,7 +70,57 @@ const MIGRATIONS = [
      risk_flags TEXT NOT NULL,
      outcome TEXT NOT NULL
    );
-   CREATE INDEX approvals_ts ON approvals(ts);`
+   CREATE INDEX approvals_ts ON approvals(ts);`,
+  // M4: tasks, the user's end-of-day notes and the closed daily reports. Not derived from events, so the prune leaves them alone.
+  `CREATE TABLE tasks (
+     id TEXT PRIMARY KEY,
+     title TEXT NOT NULL,
+     project TEXT,
+     status TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     done_at INTEGER,
+     session_name TEXT
+   );
+   CREATE INDEX tasks_done_at ON tasks(done_at);
+   CREATE TABLE eod_notes (day TEXT PRIMARY KEY, notes TEXT NOT NULL, updated_at INTEGER NOT NULL);
+   CREATE TABLE eod_reports (day TEXT PRIMARY KEY, json TEXT NOT NULL, closed INTEGER NOT NULL, generated_at INTEGER NOT NULL);`,
+  // Usage from Claude Code's OTel metrics (ADR-0007): delta points summed per local day × model × type. No session, no
+  // account: the identity attributes never reach this table (R12). `type` is input, output, cacheRead, cacheCreation or cost.
+  `CREATE TABLE usage (
+     day TEXT NOT NULL,
+     model TEXT NOT NULL,
+     type TEXT NOT NULL,
+     value REAL NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (day, model, type)
+   ) WITHOUT ROWID;`,
+  // Token counts read from Claude Code's local logs (ADR-0009 amendment, opt-in `usage.readLogs`), one row per assistant message
+  // (`key` = message id : request id, so a streamed message counts once) and where reading stopped in each file. Apart from the
+  // OTel `usage` table: the snapshot takes one source or the other, never both. No prompt, reply, tool data or path is stored
+  // except the log file's own path in usage_log_files, which is needed to resume reading it.
+  `CREATE TABLE usage_log (
+     key TEXT PRIMARY KEY,
+     ts INTEGER NOT NULL,
+     model TEXT NOT NULL,
+     input INTEGER NOT NULL,
+     output INTEGER NOT NULL,
+     cache_read INTEGER NOT NULL,
+     cache_write INTEGER NOT NULL,
+     cache_write_1h INTEGER NOT NULL,
+     odd INTEGER NOT NULL
+   ) WITHOUT ROWID;
+   CREATE INDEX usage_log_ts ON usage_log(ts);
+   CREATE TABLE usage_log_files (
+     path TEXT PRIMARY KEY,
+     size INTEGER NOT NULL,
+     mtime INTEGER NOT NULL,
+     offset INTEGER NOT NULL,
+     head TEXT NOT NULL
+   ) WITHOUT ROWID;`,
+  // Roles: the role a task is for (a Roles catalog id) and its name when it was chosen, so the daily report still says "as CTO" if the
+  // role is renamed or deleted. Both are nullable and ignored by a build that does not know them (every statement names its columns).
+  `ALTER TABLE tasks ADD COLUMN role TEXT;
+   ALTER TABLE tasks ADD COLUMN role_name TEXT;`
 ]
 
 const DAY_MS = 86_400_000
@@ -105,10 +162,28 @@ export interface SnapshotExtras {
   awaySince: number | null
   awayUntil: number | null
   agentDefinitionCount: number
+  /** The Usage card's bar (Settings › Claude Code); the default until main says otherwise. */
+  weeklyBudgetUsd?: number
+  /** `usage.readLogs` is on: the card is fed from the local logs, with this watcher's progress. Absent or off: from OTel. */
+  usageLogs?: WatcherStatus
 }
+
+interface UsageCell {
+  day: string
+  type: UsageType
+  value: number
+}
+
+/** The model name is cut and cleaned at parse time and can hold no tab, so a tab joins the three parts safely. */
+const usageKey = (day: string, model: string, type: string): string => [day, model, type].join('\t')
 
 export class Store {
   private readonly db: DatabaseSync
+  /** Tasks, notes and closed daily reports: the tables the event prune never touches. */
+  readonly work: WorkStore
+  /** Token counts read from the local logs; empty and untouched unless `usage.readLogs` is on. */
+  readonly usageLog: UsageLogStore
+  private logSummary: { key: string; usage: Usage } | null = null
   private readonly sessions = new Map<string, SessionState>()
   private spans: Span[] = []
   private finished: number[] = []
@@ -117,12 +192,22 @@ export class Store {
   /** dedupeKey → arrival, oldest first (D-056). */
   private readonly recent = new Map<string, number>()
   private attention: AttentionState = emptyAttention()
+  /** Usage rows of the last 30 days, keyed day · model · type (ADR-0007), and when figures last arrived. */
+  private readonly usage = new Map<string, UsageCell>()
+  private usageAt: number | null = null
 
   constructor(file: string, now = Date.now()) {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
     this.migrate()
+    this.work = new WorkStore(this.db)
+    this.usageLog = new UsageLogStore(this.db, now)
     this.load(now)
+  }
+
+  /** What the Daily report needs from memory: stretches still open, session names and folders, and what waits on the user. */
+  eodLive(): { sessions: ReadonlyMap<string, SessionState>; attention: readonly AttentionRecord[] } {
+    return { sessions: this.sessions, attention: this.attention.open }
   }
 
   close(): void {
@@ -174,6 +259,10 @@ export class Store {
       .prepare('SELECT path, session_id, tool, changed_at FROM files WHERE changed_at >= ? ORDER BY changed_at')
       .all(since)
       .map((r) => ({ path: String(r.path), sessionId: String(r.session_id), tool: String(r.tool), changedAt: Number(r.changed_at) }))
+    for (const r of this.db.prepare('SELECT day, model, type, value, updated_at FROM usage WHERE day >= ?').all(dayKey(now - RETENTION_MS))) {
+      this.usage.set(usageKey(String(r.day), String(r.model), String(r.type)), { day: String(r.day), type: String(r.type) as UsageType, value: Number(r.value) })
+      this.usageAt = Math.max(this.usageAt ?? 0, Number(r.updated_at))
+    }
     for (const r of this.db
       // Subagents only (UI_MAP § Agents): main-thread events also carry agent_type when settings name an `agent`.
       .prepare("SELECT agent_type, MAX(ts) AS at FROM events WHERE kind = 'subagent.started' AND agent_type IS NOT NULL AND ts >= ? GROUP BY agent_type")
@@ -377,6 +466,53 @@ export class Store {
     return true
   }
 
+  /** ADR-0007: Claude Code's token and cost deltas, added to today's rows. Returns whether anything was stored. */
+  ingestUsage(points: readonly UsagePoint[], now: number): boolean {
+    if (!points.length) return false
+    const day = dayKey(now)
+    const upsert = this.db.prepare(
+      `INSERT INTO usage (day, model, type, value, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(day, model, type) DO UPDATE SET value = value + excluded.value, updated_at = excluded.updated_at`
+    )
+    this.tx(() => {
+      for (const p of points) upsert.run(day, p.model, p.type, p.value, now)
+    })
+    for (const p of points) {
+      const key = usageKey(day, p.model, p.type)
+      this.usage.set(key,{ day, type: p.type, value: (this.usage.get(key)?.value ?? 0) + p.value })
+    }
+    this.usageAt = now
+    return true
+  }
+
+  /** When figures last arrived, or null if none did in the last 30 days. */
+  lastUsageAt(): number | null {
+    return this.usageAt
+  }
+
+  /** From the logs: always a figure (zero is one) while reading is on. Rebuilt at most once a second, or when a figure changes. */
+  private logUsage(now: number, weeklyBudgetUsd: number, status: WatcherStatus): Usage {
+    const key = [this.usageLog.version, status.done, status.total, status.files, weeklyBudgetUsd, Math.floor(now / 1000)].join(':')
+    if (this.logSummary?.key === key) return this.logSummary.usage
+    const usage = summarizeLog({
+      records: [...this.usageLog.records()],
+      now,
+      todayFrom: new Date(now).setHours(0, 0, 0, 0),
+      weekFrom: weekStart(now),
+      weeklyBudgetUsd,
+      scan: status.scanning ? { done: status.done, total: status.total } : null,
+      files: status.files,
+      lastAt: status.lastAt
+    })
+    this.logSummary = { key, usage }
+    return usage
+  }
+
+  /** Null until Claude Code has reported once: the card shows its prompt, never an invented zero. */
+  private usageSummary(now: number, weeklyBudgetUsd: number): Usage | null {
+    return this.usageAt === null ? null : summarizeUsage(this.usage.values(), dayKey(now), dayKey(weekStart(now)), weeklyBudgetUsd)
+  }
+
   snapshot(now: number, extras: SnapshotExtras): Snapshot {
     const week = weekStart(now)
     const lastWeek = lastWeekStart(now)
@@ -406,7 +542,10 @@ export class Store {
         agentTimeLastWeekMs: Math.round(agentTime(lastWeek, week)),
         finishedTurns: this.finished.filter((t) => t >= week)
       },
-      usage: null, // OTel receiver (ADR-0007) is opt-in and lands later
+      // One source, never both: with the logs on their figures replace the OTel ones, so nothing is counted twice.
+      usage: extras.usageLogs
+        ? this.logUsage(now, extras.weeklyBudgetUsd ?? DEFAULT_WEEKLY_BUDGET_USD, extras.usageLogs)
+        : this.usageSummary(now, extras.weeklyBudgetUsd ?? DEFAULT_WEEKLY_BUDGET_USD),
       recentAgentTypes: [...this.agentTypes.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, MAX_AGENT_TYPES)
@@ -467,6 +606,9 @@ export class Store {
       this.db.prepare('DELETE FROM files WHERE changed_at < ?').run(cutoff)
       this.db.prepare('DELETE FROM attention_items WHERE COALESCE(resolved_at, opened_at) < ?').run(cutoff)
       this.db.prepare('DELETE FROM approvals WHERE ts < ?').run(cutoff)
+      this.db.prepare('DELETE FROM usage WHERE day < ?').run(dayKey(cutoff))
+      this.work.prune(now)
+      this.usageLog.prune(now)
     })
     this.attention = { ...this.attention, open: this.attention.open.filter((i) => i.openedAt >= cutoff) }
     const since = lastWeekStart(now)
@@ -475,5 +617,7 @@ export class Store {
     this.files = this.files.filter((f) => f.changedAt >= since)
     for (const [id, s] of this.sessions) if (s.lastEventAt < cutoff) this.sessions.delete(id)
     for (const [t, at] of this.agentTypes) if (at < now - 7 * DAY_MS) this.agentTypes.delete(t)
+    for (const [k, u] of this.usage) if (u.day < dayKey(cutoff)) this.usage.delete(k)
+    if (this.usage.size === 0) this.usageAt = null
   }
 }

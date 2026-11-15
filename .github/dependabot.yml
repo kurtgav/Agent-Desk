@@ -1,0 +1,48 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Wait two weeks after a release before proposing it, the same rule used when pinning by hand.
+    # Security updates ignore the cooldown.
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(deps)'
+    labels: [dependencies]
+    groups:
+      electron:
+        patterns: [electron, electron-builder, electron-vite]
+      lint:
+        patterns: [eslint, '@eslint/*', eslint-plugin-*, typescript-eslint, globals]
+      react:
+        patterns: [react, react-dom, '@types/react', '@types/react-dom', '@vitejs/plugin-react']
+      radix:
+        patterns: ['@radix-ui/*']
+      tailwind:
+        patterns: [tailwindcss, '@tailwindcss/*', tailwind-merge]
+      test:
+        patterns: [vitest, '@playwright/*', '@axe-core/*']
+      other-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # typescript-eslint 8.72 supports TypeScript <6.1.0 (DECISIONS D-036); move both together by hand.
+      - dependency-name: typescript
+        update-types: [version-update:semver-minor, version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: 'ci(deps)'
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ['*']

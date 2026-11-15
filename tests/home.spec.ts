@@ -17,7 +17,7 @@ let pageErrors: string[] = []
 function appEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData }
 }
 
 /** These tests check the reference design against the fixed demo data (ADR-0011), so demo mode is seeded. */
@@ -126,10 +126,10 @@ test('a Running now row opens the session drawer; demo actions run nothing; Esc 
   expect(errors).toEqual([])
 })
 
-test('composer: Shift+Enter adds a line, @ mentions a subagent, Agent picks one, Enter sends (demo runs nothing)', async () => {
+test('composer: Shift+Enter adds a line, @ brings an agent in as a chip, Run in the background sends nothing in demo', async () => {
   const { page, errors } = await open(1440, 924)
   const box = page.locator('#composer-input')
-  const send = page.getByRole('button', { name: 'Dispatch task' })
+  const send = page.getByRole('button', { name: 'Start conversation' })
   await expect(send).toHaveAttribute('aria-disabled', 'true')
   await box.fill('Fix the flaky login test')
   await expect(send).toHaveAttribute('aria-disabled', 'false')
@@ -137,73 +137,76 @@ test('composer: Shift+Enter adds a line, @ mentions a subagent, Agent picks one,
   await box.pressSequentially('and the retry')
   await expect(box).toHaveValue('Fix the flaky login test\nand the retry')
 
-  await page.getByRole('button', { name: 'Mention a subagent' }).click()
-  const mention = page.getByRole('dialog', { name: 'Mention a subagent' })
-  await mention.getByRole('textbox', { name: 'Search subagents' }).fill('review')
-  await mention.getByRole('button', { name: 'code-reviewer', exact: true }).click()
-  await expect(box).toHaveValue('Fix the flaky login test\nand the retry @agent-code-reviewer ')
+  // An agent installed in Claude Code can lead a background session: @ writes it into the text, and a chip mirrors it.
+  await box.press('Control+Home')
+  await box.pressSequentially('@code-rev')
+  await expect(page.getByRole('listbox', { name: 'Agents' })).toBeVisible()
+  await box.press('Enter')
+  await expect(box).toHaveValue(/^@code-reviewer Fix the flaky login test\nand the retry$/)
+  await expect(page.getByRole('group', { name: 'Agents in this message' })).toContainText('code-reviewer')
   await expect(box).toBeFocused()
 
-  await page.getByRole('button', { name: 'Subagent: default. Change subagent' }).click()
-  await page.getByRole('dialog', { name: 'Run as subagent' }).getByRole('button', { name: 'Plan', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Subagent: Plan. Change subagent' })).toBeVisible()
-
-  await box.press('Enter')
+  await page.getByRole('button', { name: 'Run in the background' }).click()
   await expect(page.getByTestId('notice')).toHaveText('Demo data: nothing was dispatched.')
-  await expect(box).toHaveValue(/@agent-code-reviewer/)
+  await expect(box).toHaveValue(/@code-reviewer/)
   expect(errors).toEqual([])
 })
 
-/** Everything a click could change: what's open, where we are, and the Home data on screen. */
-async function observable(page: Page) {
-  return {
-    url: page.url(),
-    layers: await page.locator('[role=dialog], [role=menu], [data-radix-popper-content-wrapper] [role=dialog]').count(),
-    needs: await page.getByRole('region', { name: 'Needs you' }).innerText(),
-    announcement: await page.locator('p[role=status]').innerText()
-  }
+/** D-033 is retired: no control may promise a later milestone, so every page and menu is checked for what used to mark one. */
+async function expectNoPending(page: Page): Promise<void> {
+  await expect(page.locator('[data-pending]')).toHaveCount(0)
+  await expect(page.getByText(/Arrives with/)).toHaveCount(0)
 }
 
-test('later-milestone controls are inert and say when they arrive', async () => {
+test('no control promises a later milestone, and the working ones work', async () => {
   const { page, errors } = await open(1440, 924)
-  const before = await observable(page)
+  await expectNoPending(page)
 
-  // M4 left nothing pending; what remains (M5) is inert: activated by mouse and by keyboard, it changes nothing.
-  await expect(page.locator('[data-pending="M4"]')).toHaveCount(0)
-  const controls = await page.locator('[data-pending]').all()
-  expect(controls.length).toBeGreaterThan(0)
-  for (const el of controls) {
-    await expect(el).toHaveAttribute('aria-disabled', 'true')
-    await el.click({ force: true }) // aria-disabled, so Playwright would refuse a normal click
-    await el.focus()
-    await page.keyboard.press('Enter')
-    expect(await observable(page)).toEqual(before)
+  const main = page.getByRole('navigation', { name: 'Main' })
+  for (const name of ['Tasks', 'Sessions', 'Approvals', 'Files', 'Activity', 'Daily report', 'Home']) {
+    // Approvals carries its open count in its name ("Approvals 2 open").
+    const item = main.getByRole('button', { name: new RegExp(`^${name}( [0-9]+ open)?$`) })
+    await item.click()
+    await expect(item).toHaveAttribute('aria-current', 'page')
+    await expectNoPending(page)
   }
+  await page.getByRole('button', { name: /^Roles/ }).click()
+  await expectNoPending(page)
 
-  // Keyboard focus shows the explanation too.
-  await page.keyboard.press('Escape')
-  await page.locator('#composer-input').focus()
-  await page.getByRole('button', { name: 'Settings', exact: true }).focus()
-  await expect(page.getByRole('tooltip')).toHaveText('Settings: Arrives with settings and diagnostics (M5)')
+  // The gear and the user block both open Settings, which has every section.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  for (const title of ['Profile', 'Daily report', 'Notifications', 'Startup', 'Integration', 'Diagnostics']) {
+    await expect(page.getByRole('heading', { level: 2, name: title, exact: true })).toBeVisible()
+  }
+  await expectNoPending(page)
+  await main.getByRole('button', { name: 'Home' }).click()
+  await page.getByRole('button', { name: /Your profile$/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
 
-  // Pending menu rows are reachable by keyboard, explain themselves, and keep the menu as it was.
+  // ⋯ › Diagnostics and ⋯ › Settings are ordinary menu items now; the switcher's Diagnostics too.
   await page.getByRole('button', { name: 'More', exact: true }).click()
-  const item = page.getByRole('menuitem', { name: /Diagnostics/ })
-  await expect(item).toHaveAttribute('data-pending', 'M5')
-  await expect(item).toContainText('Arrives with settings and diagnostics (M5)')
-  await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('Enter')
-  await expect(page.getByRole('menu')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menuitem', { name: 'Settings' })).not.toHaveAttribute('aria-disabled', 'true')
+  await page.getByRole('menuitem', { name: 'Diagnostics' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Diagnostics' })).toBeInViewport()
+  await page.getByRole('button', { name: 'Third Code workspace menu' }).click()
+  await page.getByRole('menuitem', { name: 'Diagnostics' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Diagnostics' })).toBeInViewport()
+
+  await expect(page.getByRole('button', { name: 'Enable usage' })).toHaveCount(0)
+  await expectNoPending(page)
 
   // Working controls in M1: New task focuses the composer, effort cycles, sidebar toggles keep focus.
+  await main.getByRole('button', { name: 'Home' }).click()
   await page.getByRole('banner').getByRole('button', { name: 'New task' }).click()
   await expect(page.locator('#composer-input')).toBeFocused()
   await page.getByRole('button', { name: /^Effort: High/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Extra high' }).click()
   await expect(page.getByRole('button', { name: 'Effort: Extra high. Change effort' })).toBeVisible()
   await page.getByRole('button', { name: 'Collapse sidebar' }).focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible() // collapsed, the gear stays
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeFocused()
   expect(errors).toEqual([])
@@ -250,9 +253,20 @@ test('the sidebar opens every list page, each passes axe, and the breadcrumb and
   await expect(page.getByRole('region', { name: 'Events' }).getByRole('listitem').first()).toBeVisible()
   expect(await axe(page)).toEqual([])
 
-  await page.getByRole('button', { name: /^All agents/ }).click()
-  await expect(title).toHaveText('Agents')
-  await expect(page.getByRole('region', { name: 'Subagents' }).getByRole('listitem')).toHaveCount(4)
+  await nav.getByRole('button', { name: 'Tasks' }).click()
+  await expect(title).toHaveText('Tasks')
+  await expect(page.getByRole('region', { name: 'In progress' }).getByRole('listitem')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Waiting on you' }).getByRole('listitem')).toHaveCount(4)
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Daily report' }).click()
+  await expect(title).toHaveText('Daily report')
+  await expect(page.getByRole('navigation', { name: 'Report days' }).getByRole('button')).toHaveCount(6)
+  expect(await axe(page)).toEqual([])
+
+  await page.getByRole('button', { name: /^Roles/ }).click()
+  await expect(title).toHaveText('Roles')
+  await expect(page.getByRole('region', { name: 'Leadership' })).toBeVisible()
   expect(await axe(page)).toEqual([])
 
   await crumb.getByRole('button', { name: 'Home' }).click()

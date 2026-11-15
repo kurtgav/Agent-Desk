@@ -67,7 +67,7 @@ export function superviseCollector(
 
   return {
     post: (m) => {
-      if (m.type === 'visible' || m.type === 'focus' || m.type === 'approvals') latest.set(m.type, m)
+      if (m.type === 'visible' || m.type === 'focus' || m.type === 'approvals' || m.type === 'usageBudget' || m.type === 'usageLogs') latest.set(m.type, m)
       child?.postMessage(m)
     },
     request: (build) => {

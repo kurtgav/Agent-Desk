@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# electron-builder output (npm run pack / npm run dist)
+release/
 *.log
 spikes/out/
 spikes/scratch/hello.txt
@@ -13,3 +15,13 @@ playwright-report/
 *.tsbuildinfo
 # Claude Code session lock, not project config
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
+# Secrets and signing material must never be committed (v1 ships unsigned, so there is none yet)
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+coverage/
+Thumbs.db
+.DS_Store

@@ -3,10 +3,30 @@
   "productName": "AgentDeck",
   "version": "0.1.0",
   "private": true,
-  "description": "Local Windows dashboard for every Claude Code session on this PC.",
+  "description": "Local dashboard for every Claude Code session on this computer, for Windows and macOS.",
   "author": "Third Code",
   "license": "MIT",
   "repository": "github:kurtgav/Agent-Desk",
+  "homepage": "https://github.com/kurtgav/Agent-Desk#readme",
+  "bugs": {
+    "url": "https://github.com/kurtgav/Agent-Desk/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "dashboard",
+    "tray",
+    "electron",
+    "windows",
+    "macos",
+    "hooks",
+    "agents",
+    "local-first"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -17,13 +37,19 @@
     "test": "vitest run",
     "test:smoke": "electron-vite build && playwright test",
     "check": "npm run typecheck && npm run lint && npm run test && npm run test:smoke",
-    "scratch:hooks": "node scripts/scratch-hooks.mjs"
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder --win nsis",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "scratch:hooks": "node scripts/scratch-hooks.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
+    "social-preview": "node scripts/social-preview.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.3",
     "@eslint/js": "10.0.1",
     "@fontsource-variable/inter": "5.3.0",
     "@playwright/test": "1.64.1",
+    "@radix-ui/react-context-menu": "2.4.1",
     "@radix-ui/react-dialog": "1.3.1",
     "@radix-ui/react-dropdown-menu": "2.2.1",
     "@radix-ui/react-popover": "1.3.1",
@@ -38,6 +64,7 @@
     "clsx": "2.1.1",
     "cross-spawn": "7.0.6",
     "electron": "45.2.2",
+    "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",

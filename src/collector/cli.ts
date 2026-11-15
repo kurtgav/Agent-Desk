@@ -124,9 +124,12 @@ export function launch(
   })
 }
 
-/** The Desktop app's own exe is also named claude.exe, and Desktop bundles a second CLI (F1). */
+/**
+ * The Desktop app's own exe is also named claude.exe, and Desktop bundles a second CLI (F1). On macOS the app is Claude.app and
+ * its data (where a bundled CLI would live) is under ~/Library/Application Support/Claude (unverified on a Mac).
+ */
 export function isDesktopPath(p: string): boolean {
-  return /\\WindowsApps\\Claude_|\\Claude-Data\\/i.test(p)
+  return /\\WindowsApps\\Claude_|\\Claude-Data\\|\/Claude\.app\/|\/Application Support\/Claude\//i.test(p)
 }
 
 export async function isClaudeCli(file: string): Promise<boolean> {
@@ -134,22 +137,48 @@ export async function isClaudeCli(file: string): Promise<boolean> {
   return code === 0 && VERSION_RE.test(stdout.trim())
 }
 
-/** Every match of `where.exe <name>` on PATH, in order; none when it isn't there. */
-export async function which(name: string): Promise<string[]> {
-  const r = await run(system32('where.exe'), [name], VERSION_TIMEOUT_MS)
+/** Every match of `<name>` on PATH, in order (`where.exe` on Windows, `which -a` elsewhere); none when it isn't there. */
+export async function which(name: string, platform: NodeJS.Platform = process.platform, exec: typeof run = run): Promise<string[]> {
+  const r = platform === 'win32' ? await exec(system32('where.exe'), [name], VERSION_TIMEOUT_MS) : await exec('/usr/bin/which', ['-a', name], VERSION_TIMEOUT_MS)
   return r.code === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
 }
 
-/** D-024: Settings override → ~/.local/bin/claude.exe → `where claude` (minus Desktop paths) → npm global shim. */
-export async function resolveClaude(override: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  const home = env.USERPROFILE ?? ''
-  const found = await which('claude')
+/**
+ * D-024, in order: the Settings override, the native installer's path, PATH (minus Desktop's copies), then where npm puts a
+ * global install. Windows: ~/.local/bin/claude.exe, `where claude`, %APPDATA%\npm\claude.cmd. macOS: ~/.local/bin/claude,
+ * `which -a claude` (on the login shell's PATH, see loginShellPath), then Homebrew's and the Node installer's npm prefixes.
+ */
+export async function resolveClaude(
+  override: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  deps: { which: typeof which; exists: (p: string) => boolean; isCli: (p: string) => Promise<boolean> } = { which, exists: existsSync, isCli: isClaudeCli }
+): Promise<string | null> {
+  const win = platform === 'win32'
+  const home = (win ? env.USERPROFILE : env.HOME) ?? ''
+  const found = await deps.which('claude', platform)
   const candidates = [
     override,
-    home && join(home, '.local', 'bin', 'claude.exe'),
+    home && join(home, '.local', 'bin', win ? 'claude.exe' : 'claude'),
     ...found.filter((p) => !isDesktopPath(p)),
-    env.APPDATA && join(env.APPDATA, 'npm', 'claude.cmd')
+    ...(win ? [env.APPDATA && join(env.APPDATA, 'npm', 'claude.cmd')] : ['/opt/homebrew/bin/claude', '/usr/local/bin/claude'])
   ].filter((p): p is string => Boolean(p))
-  for (const c of [...new Set(candidates)]) if (existsSync(c) && (await isClaudeCli(c))) return c
+  for (const c of [...new Set(candidates)]) if (deps.exists(c) && (await deps.isCli(c))) return c
   return null
+}
+
+const PATH_MARK = '__AGENTDECK_PATH__'
+const SHELL_TIMEOUT_MS = 3_000
+
+/**
+ * macOS gives an app started from Finder or the Dock a bare PATH (no Homebrew, nvm or npm prefix), so `claude` and what it
+ * starts would not be found. This asks the user's login shell once, as Terminal would set it up, and reads PATH between
+ * markers (rc files may print). Null when the shell fails, is slow or prints nothing usable: the caller keeps its PATH.
+ */
+export async function loginShellPath(env: NodeJS.ProcessEnv = process.env, exec: typeof run = run): Promise<string | null> {
+  const shell = env.SHELL?.startsWith('/') ? env.SHELL : '/bin/zsh'
+  // oh-my-zsh would otherwise stop at its update prompt until the timeout.
+  const r = await exec(shell, ['-ilc', `printf '${PATH_MARK}%s${PATH_MARK}' "$PATH"`], SHELL_TIMEOUT_MS, { ...cleanEnv(env), DISABLE_AUTO_UPDATE: 'true' })
+  const path = new RegExp(`${PATH_MARK}(.*?)${PATH_MARK}`, 's').exec(r.stdout)?.[1]?.trim()
+  return path && path.includes('/') ? path : null
 }

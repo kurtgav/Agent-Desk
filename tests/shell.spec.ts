@@ -28,7 +28,7 @@ function appEnv(userData: string): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !key.startsWith('CLAUDE')) env[key] = value
   }
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData }
 }
 
 async function launch(userData: string, extraArgs: string[] = []): Promise<ElectronApplication> {
@@ -237,4 +237,32 @@ test('--hidden starts in the tray without showing the window', async () => {
     electronApp.emit('second-instance')
   })
   await expectVisible(app, true)
+})
+
+test('no page offers a control that promises a later milestone (D-033 retired)', async () => {
+  const app = await launch(freshUserData())
+  const page = await app.firstWindow()
+  await page.waitForLoadState('load')
+  const main = page.getByRole('navigation', { name: 'Main' })
+  await expect(main).toBeVisible()
+  const none = async (): Promise<void> => {
+    await expect(page.locator('[data-pending]')).toHaveCount(0)
+    await expect(page.getByText(/Arrives with/)).toHaveCount(0)
+  }
+  for (const name of ['Home', 'Console', 'Tasks', 'Sessions', 'Approvals', 'Files', 'Activity', 'Daily report']) {
+    await main.getByRole('button', { name: new RegExp(`^${name}( [0-9]+ open)?$`) }).click()
+    await none()
+  }
+  await page.getByRole('button', { name: /^Roles ?[0-9]*$/ }).click()
+  await none()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  await none()
+  // Live with no usage setting on (usage-from-logs): the Usage line says token counts are off and offers the one real way to show
+  // them, a button that opens Settings > Claude Code, not a control that does nothing.
+  await expect(page.getByText('Token counts are off. One setting shows them now, with no new session.')).toBeVisible()
+  await page.getByRole('button', { name: 'Show token usage' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Claude Code' })).toBeVisible()
+  await none()
 })

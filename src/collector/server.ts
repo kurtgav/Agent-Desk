@@ -16,8 +16,14 @@ export interface Handlers {
    * (undefined = empty). `gone` aborts when the connection closes first.
    */
   onHook(raw: string, receivedAt: number, gone: AbortSignal): Promise<unknown> | void
+  /** An OTLP/HTTP JSON metrics body (ADR-0007). Already answered with 200 when this runs. */
+  onMetrics(raw: string, receivedAt: number): void
   snapshot(): unknown
 }
+
+/** ADR-0007: only plain JSON is read. Protobuf (or any compressed body) answers 415, so the exporter can say why. */
+const readableAsJson = (req: IncomingMessage): boolean =>
+  /^application\/json\s*(?:;|$)/i.test(req.headers['content-type'] ?? '') && ['', 'identity'].includes((req.headers['content-encoding'] ?? '').toLowerCase())
 
 function tokenOk(given: string | string[] | undefined, token: string): boolean {
   if (typeof given !== 'string') return false
@@ -69,6 +75,14 @@ function handler(h: Handlers, port: () => number) {
         void held.then((body) => {
           if (!res.destroyed && !res.writableEnded) reply(res, 200, body)
         })
+      })
+    }
+    // Metrics only (ADR-0007 also lists /v1/logs; this build never asks Claude Code for logs, so prompts and tool content have no way in).
+    if (req.method === 'POST' && url === '/v1/metrics') {
+      if (!readableAsJson(req)) return reply(res, 415)
+      return readBody(req, res, (raw) => {
+        reply(res, 200, {}) // OTLP/HTTP success is an empty ExportMetricsServiceResponse
+        h.onMetrics(raw, Date.now())
       })
     }
     if (req.method === 'GET' && url === '/health') return reply(res, 200, { app: 'agentdeck', pid: process.pid })

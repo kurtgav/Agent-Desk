@@ -97,7 +97,8 @@ Our entries are identified by `type:"http"`, a URL matching `^http://127\.0\.0\.
 - The taskbar overlay badge shows the count of open P1+P2 items. The tray dot shows status: green = live, amber = needs you, gray = paused, red = hooks missing.
 - `flashFrame` fires on a new P1 while the window is unfocused.
 - Toasts fire for P1, P2 and completions. A toast is suppressed if that item is already on screen, and quiet hours apply.
-- Custom title bar via `titleBarOverlay`.
+- Custom title bar via `titleBarOverlay` on Windows. macOS: `titleBarStyle: 'hiddenInset'` with the traffic lights centred in the 48 px bar; the sidebar keeps their corner clear (`html[data-platform]`).
+- macOS: the Dock badge carries the taskbar overlay's count, clicking the Dock icon reopens the window, the plain menu bar icon is a template image, and the packaged app has the standard App/File/Edit/View/Window menu (ADR-0012 Amendment).
 - On `powerMonitor` `resume` or `unlock`: force a poll, mark sessions stale until confirmed, and re-check that the port is still bound.
 
 ## 8. Security model (ADR-0010)
@@ -106,7 +107,7 @@ Our entries are identified by `type:"http"`, a URL matching `^http://127\.0\.0\.
 - The token is stored in `%APPDATA%\AgentDeck\config.json` and in our hook headers. The threat model accepts that other local processes running as the same user can read it.
 - Remote approvals need the token **and** a click in the AgentDeck window. There is no API-only approve.
 - Payload previews are redacted (EVENT_SCHEMA § Redaction). OTel identity attributes are dropped at ingest.
-- AgentDeck never reads transcripts, `~/.claude/jobs`, credentials or `~/.claude.json` (ADR-0009).
+- AgentDeck never reads transcript content, `~/.claude/jobs`, credentials or `~/.claude.json` (ADR-0009). The one exception is an opt-in switch, off by default, that reads only token counts from Claude Code's local session logs (ADR-0009 amendment); the text is dropped as each line is read and never stored.
 - Logs rotate in `%APPDATA%\AgentDeck\logs` (5 × 5 MB).
 
 ## 9. Performance budgets and how each is measured
@@ -118,9 +119,9 @@ Our entries are identified by `type:"http"`, a URL matching `^http://127\.0\.0\.
 | RAM < 300 MB | working set of main + collector + renderer |
 
 ## 10. Paths
-`%APPDATA%\AgentDeck\` holds `agentdeck.db`, `config.json`, `logs\` and `backups\` (copies of settings.json, last 20). There is also a separate `demo.db` for Demo mode (ADR-0011).
+Electron's `userData` folder (`%APPDATA%\AgentDeck\` on Windows, `~/Library/Application Support/AgentDeck/` on macOS) holds `agentdeck.db`, `config.json`, `logs\` and `backups\` (copies of settings.json, last 20). There is also a separate `demo.db` for Demo mode (ADR-0011).
 
-The Claude config dir is `CLAUDE_CONFIG_DIR`, or `%USERPROFILE%\.claude` when that is unset.
+The Claude config dir is `CLAUDE_CONFIG_DIR`, or `~/.claude` when that is unset.
 
 ## 11. Out of scope (v1)
-claude.ai and cloud sessions, WSL, macOS and Linux builds (the code stays portable: no Windows-only APIs outside `main/os/*`), remote or multi-user access, and auto-approve rules.
+claude.ai and cloud sessions, WSL, a Linux build, a notarized macOS build (the macOS build branches on `process.platform` where the OS differs, ADR-0012 Amendment), remote or multi-user access, and auto-approve rules.

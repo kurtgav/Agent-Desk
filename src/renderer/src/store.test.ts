@@ -3,7 +3,7 @@ import type { AgentDeckBridge, AppStatus } from '@shared/bridge'
 import type { Snapshot } from '@shared/snapshot'
 import { demoHistory, demoSnapshot } from './demo/snapshot'
 import { commands, search } from './components/Palette'
-import { HOME, connect, useUi } from './store'
+import { NEW_SESSION, connect, useUi } from './store'
 
 const NOW = Date.UTC(2026, 10, 5, 14, 0)
 const session = (id: string) => useUi.getState().snapshot.sessions.find((s) => s.id === id)!
@@ -16,7 +16,8 @@ beforeEach(() => {
 describe('command palette search (UI_MAP § Top bar)', () => {
   it('with nothing typed: pages, actions, and the five newest sessions', () => {
     const shown = search(commands(), '')
-    expect(shown.filter((c) => c.group === 'Go to').map((c) => c.label)).toEqual(['Home', 'Sessions', 'Approvals', 'Files', 'Activity', 'Agents'])
+    expect(shown.filter((c) => c.group === 'Go to').map((c) => c.label)).toEqual(['Overview', 'Tasks', 'All sessions', 'Approvals', 'Files', 'Activity', 'Daily report', 'Agents', 'Settings'])
+    expect(shown.find((c) => c.group === 'Actions')).toMatchObject({ id: 'new-session', label: 'New session' })
     expect(shown.filter((c) => c.group === 'Sessions')).toHaveLength(5)
     expect(shown.some((c) => c.group === 'Files' || c.group === 'Projects')).toBe(false)
   })
@@ -34,7 +35,14 @@ describe('command palette search (UI_MAP § Top bar)', () => {
   it('a project result opens Sessions filtered to it', () => {
     search(commands(), 'billing').find((c) => c.group === 'Projects')!.run()
     expect(useUi.getState().nav).toMatchObject({ page: 'sessions', project: expect.stringMatching(/billing/i) })
-    useUi.setState({ nav: HOME })
+    useUi.getState().go(NEW_SESSION)
+  })
+
+  it('a session result opens it in the main pane', () => {
+    const session = search(commands(), 'agentdeck-ui').find((c) => c.group === 'Sessions')!
+    session.run()
+    expect(useUi.getState().nav).toEqual({ page: 'session', session: 's-deck' })
+    useUi.getState().go(NEW_SESSION)
   })
 })
 
@@ -95,7 +103,7 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
   function fakeBridge(demo: boolean) {
     let push: (s: Snapshot | null) => void = () => undefined
     const bridge: AgentDeckBridge = {
-      getAppInfo: async () => ({ version: '0.1.0', demo }),
+      getAppInfo: async () => ({ version: '0.1.0', demo, platform: 'win32' }),
       getSnapshot: async () => null,
       onSnapshot: (l) => {
         push = l
@@ -120,7 +128,74 @@ describe('connect (D-059: no collector, no "All quiet")', () => {
       chooseFolder: async () => null,
       runClaudeIn: async () => ({ ok: true }),
       listAgents: async () => [],
-      getHistory: async () => null
+      getHistory: async () => null,
+      listTasks: async () => null,
+      addTask: async () => ({ ok: false, error: 'x' }),
+      updateTask: async () => ({ ok: false, error: 'x' }),
+      removeTask: async () => ({ ok: true }),
+      getEod: async () => null,
+      listEodDays: async () => null,
+      saveEodNotes: async () => ({ ok: true }),
+      writeEod: async () => ({ ok: false, error: 'x' }),
+      openEodFolder: async () => ({ ok: true }),
+      copyText: async () => ({ ok: true }),
+      getSettings: async () => ({
+        profile: { name: 'You', hasAvatar: false },
+        eod: { enabled: true, time: '18:00', folder: null },
+        notifications: { completions: true, kinds: { approval: true, question: true, failed: true, stuck: false, review: true }, quietHours: null },
+        startAtLogin: false,
+        startMinimized: false,
+        theme: 'system',
+        usage: { weeklyBudgetUsd: 40, readLogs: false }
+      }),
+      updateSettings: async () => {
+        throw new Error('unused')
+      },
+      getProfile: async () => ({ name: 'You', avatar: null }),
+      chooseAvatar: async () => ({ ok: false, cancelled: true, error: '' }),
+      clearAvatar: async () => ({ name: 'You', avatar: null }),
+      getDiagnostics: async () => {
+        throw new Error('unused')
+      },
+      testNotification: async () => ({ ok: true }),
+      getClaudeLink: async () => ({ cli: { found: false, path: null, version: null }, signIn: 'unknown', plan: null, usage: { enabled: false, receiving: false, readLogs: false } }),
+      previewUsageTelemetry: async () => ({ ok: false, path: '', error: 'x' }),
+      setUsageTelemetry: async () => ({ ok: true }),
+      consoleStart: async () => ({ ok: false, error: 'x', untrusted: false }),
+      consoleSend: async () => ({ ok: true }),
+      consoleStop: async () => ({ ok: true }),
+      consoleList: async () => [],
+      consoleHistory: async () => [],
+      consoleAllow: async () => ({ ok: false, error: 'x', restart: false }),
+      consoleMcpList: async () => ({ ok: false, error: 'x' }),
+      consoleMcpCancel: async () => undefined,
+      onConsoleEvent: () => () => undefined,
+      onWorkChanged: () => () => undefined,
+      getSessionMeta: async () => ({ sessions: {}, sections: [] }),
+      setSessionMeta: async () => ({ ok: true, state: { sessions: {}, sections: [] } }),
+      setSections: async () => ({ ok: true, state: { sessions: {}, sections: [] } }),
+      touchSessions: async () => undefined,
+      getOpenTargets: async () => ({ cursor: false }),
+      listRoles: async () => {
+        throw new Error('unused')
+      },
+      reloadRoles: async () => {
+        throw new Error('unused')
+      },
+      getRolesStatus: async () => {
+        throw new Error('unused')
+      },
+      searchRoles: async () => [],
+      suggestRoles: async () => [],
+      getRole: async () => null,
+      saveCustomRole: async () => ({ ok: false, error: 'x' }),
+      deleteCustomRole: async () => ({ ok: true }),
+      duplicateRole: async () => ({ ok: false, error: 'x' }),
+      setRolePinned: async () => [],
+      setRolesRepo: async () => ({ ok: false, error: 'x' }),
+      browseRolesRepo: async () => null,
+      installRoleSkills: async () => ({ ok: true, skills: [] }),
+      removeRoleSkills: async () => ({ ok: true, skills: [] })
     }
     vi.stubGlobal('window', { agentdeck: bridge })
     return Object.assign((s: Snapshot | null) => push(s), { bridge })

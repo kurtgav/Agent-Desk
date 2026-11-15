@@ -1,14 +1,21 @@
 import type { ActionResult, AgentDef, DispatchRequest, DispatchResult, SessionAction, Verdict } from '@shared/bridge'
 import type { AttentionItem, Session } from '@shared/snapshot'
 import { useUi } from '@/store'
+import { isMac } from './platform'
 import { projectName } from './selectors'
+import { isUnread, nameOf } from './sessionMeta'
 
 const DONE: Record<SessionAction, (s: Session) => string> = {
   attach: (s) => `Opened ${s.name} in a new terminal window.`,
   stop: (s) => `Asked ${s.name} to stop.`,
   'open-folder': (s) => `Opened ${projectName(s.cwd)} in VS Code.`,
   'open-desktop': (s) => `Opened ${s.name} in Claude Desktop.`,
-  'copy-resume': () => 'Copied the resume command.'
+  'copy-resume': () => 'Copied the resume command.',
+  'focus-terminal': (s) => `Brought its window to the front. ${s.name} is waiting in the tab for ${projectName(s.cwd)}.`,
+  'open-explorer': (s) => `Opened ${projectName(s.cwd)} in ${isMac() ? 'Finder' : 'Windows Explorer'}.`,
+  'open-cursor': (s) => `Opened ${projectName(s.cwd)} in Cursor.`,
+  'open-terminal': (s) => `Opened a terminal in ${projectName(s.cwd)}.`,
+  'delete-background': (s) => `Removed ${s.name} from Claude Code. Its conversation is kept.`
 }
 
 const FAILED: ActionResult = { ok: false, error: 'AgentDeck could not run this.' }
@@ -18,11 +25,17 @@ function demo(): boolean {
   return useUi.getState().snapshot.mode === 'demo' || !window.agentdeck
 }
 
-export async function sessionAction(action: SessionAction, s: Session): Promise<void> {
-  const { notify } = useUi.getState()
-  if (demo()) return notify('Demo data: nothing was run.')
+/** Resolves to whether it worked. Acting on a session counts as having seen it, so its unread mark goes. */
+export async function sessionAction(action: SessionAction, s: Session): Promise<boolean> {
+  const { notify, sessionMeta, setSessionMeta } = useUi.getState()
+  if (isUnread(sessionMeta, s.id) && action !== 'copy-resume') setSessionMeta(s.id, { unread: false })
+  if (demo()) {
+    notify('Demo data: nothing was run.')
+    return false
+  }
   const r = await window.agentdeck!.act(action, s.id).catch(() => FAILED)
-  notify(r.ok ? DONE[action](s) : r.error, r.ok ? 'ok' : 'error')
+  notify(r.ok ? DONE[action]({ ...s, name: nameOf(sessionMeta, s) }) : r.error, r.ok ? 'ok' : 'error')
+  return r.ok
 }
 
 /** Approve-once or Reject one held request (ADR-0006). Demo answers locally and sends nothing (D-035). */

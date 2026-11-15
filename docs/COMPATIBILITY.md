@@ -80,8 +80,27 @@ Docs read on 2026-11-05 from `https://code.claude.com/docs/en/<page>` (§ = sect
 ## Settings and files
 | Interface | Source | Status |
 |---|---|---|
-| User settings `%USERPROFILE%\.claude\settings.json`; `CLAUDE_CONFIG_DIR` moves settings, history and plugins | settings § Settings files, env-vars | docs |
+| User settings `~/.claude/settings.json` (`%USERPROFILE%\.claude` on Windows); `CLAUDE_CONFIG_DIR` moves settings, history and plugins | settings § Settings files, env-vars | docs |
 | `env` block applies live, except startup-only consumers (OTel) | env-vars § Set variables in settings files | docs |
 | Subagents in `~/.claude/agents`, `.claude/agents`, plugin `agents/` (frontmatter `name`, `description`, `model`, `color`, …) | sub-agents § Choose the subagent scope | live (346 user agents) |
-| `~/.claude/jobs/*` and transcript JSONL are **not stable**, never read | agent-view § List sessions as JSON; sessions § Where transcripts are stored | docs |
+| `~/.claude/jobs/*` is **not stable**, never read. Transcript JSONL is not stable either; its content is never read, and the one opt-in exception is the next row | agent-view § List sessions as JSON; sessions § Where transcripts are stored | docs |
+| Session logs `<config dir>/projects/**/*.jsonl`, read only with `usage.readLogs` (ADR-0009 Amendment): per `type:"assistant"` row, `timestamp`, `message.model`, `message.id`, `requestId` and `message.usage` (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `speed`, `inference_geo`, `service_tier`). A streamed message is written several times with the same usage; the first copy counts, a later copy with a larger `output_tokens` replaces it. Subagent (`isSidechain`) rows are separate requests and count | internal format (sessions § Where transcripts are stored) | **live 2.1.323**, read-only probe: 280 files and 2.1 GB modified in 8 days, 63,180 assistant rows, 55% repeats of an earlier row (35,052 with equal usage, 5 with a larger output), lines up to 2.3 MB, every row `standard` speed and `global` region |
+| Prices for the cost estimate (`usage-price.ts`): per model, input, 5-minute and 1-hour cache write, cache read and output per MTok; Claude Haiku 5.5 is priced by prompt size (up to or over 100,000 tokens); fast mode and US-only inference change the price, so those requests get no cost | platform.claude.com/docs/en/about-claude/pricing, read 2026-11-13 | **verified**: the table reproduces Claude Code's own `cost.usage` ($0.00139164) for a real claude-haiku-5-5 request, with cache writes at the 1-hour rate |
 | `CLAUDECODE` / `CLAUDE_CODE_CHILD_SESSION` hide nested sessions from `claude agents` | env-vars | docs |
+
+## macOS
+What the macOS build relies on that Windows does not. **CI** means the darwin branch runs in the unit tests on a `macos-latest` runner with the OS call faked; none of these rows has been observed on a real Mac yet.
+
+| Interface | What AgentDeck relies on | Source | Status |
+|---|---|---|---|
+| Native installer path | `~/.local/bin/claude`, tried first | Claude Code setup | CI; unverified on a Mac |
+| `PATH` of a Dock-started app | bare (`/usr/bin:/bin:/usr/sbin:/sbin`), so main asks `$SHELL -ilc` once (3 s timeout, markers around `$PATH`, CLAUDE* scrubbed) before the collector starts; falls back to the bare one silently | macOS launchd behaviour | CI; unverified on a Mac |
+| `/usr/bin/which -a claude`, then `/opt/homebrew/bin/claude`, `/usr/local/bin/claude` | npm's global prefix under Homebrew (Apple silicon) and the nodejs.org installer | npm, Homebrew defaults | CI; unverified on a Mac |
+| Claude Desktop's own copies skipped | anything under `/Claude.app/` or `~/Library/Application Support/Claude/` | a guess from the Windows layout (F1) | **unverified**: the real Desktop layout on macOS has not been seen |
+| `ps -o pid=,comm= -p <pids>` | prints each live pid with its executable path; exits 1 when one pid is gone | ps(1) | CI (parsing); unverified that `comm` is the full path for every launcher |
+| Answer in terminal | `ps -axo pid=,ppid=,comm=` walks up to the outermost `.app`, then `open -a <bundle>` | ps(1), open(1) | CI; unverified on a Mac. Brings the app forward, not the tab |
+| Attach, Terminal here, run claude for the trust prompt | `osascript` with the command as `argv`: Terminal `do script`, or iTerm `create window with default profile` + `write text` when `/Applications/iTerm.app` exists. Needs the Automation consent and `NSAppleEventsUsageDescription` | Terminal and iTerm AppleScript dictionaries | CI (argument building, quoting); unverified on a Mac |
+| VS Code and Cursor | `code` / `cursor` on `PATH`, else the bundle's `Contents/Resources/app/bin/<tool>` in `/Applications` or `~/Applications` | VS Code § Launching from the command line | CI; unverified on a Mac |
+| Console stop | the child is a process-group leader (`detached`); `kill(-pid, SIGTERM)` then the child | POSIX | CI (fake kill) |
+| Dock badge, menu bar icon, window chrome | `app.dock.setBadge`, `trayTemplate.png` (+@2x), `titleBarStyle: 'hiddenInset'` with `trafficLightPosition`, an app menu with the standard roles | Electron API docs | docs; unverified on a Mac |
+| Start minimized at login | `getLoginItemSettings().wasOpenedAtLogin` (the `--hidden` argument is Windows-only) | Electron API docs | docs; unverified, may be false on newer macOS login items |

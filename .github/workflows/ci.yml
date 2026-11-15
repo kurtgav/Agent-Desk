@@ -5,16 +5,24 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same branch or PR makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+# Actions are pinned to full commit SHAs (the tag is in the comment); Dependabot keeps them current.
 jobs:
   check:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -32,10 +40,46 @@ jobs:
       # Builds the app, then runs the Playwright-Electron smoke tests against out/.
       - run: npm run test:smoke
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-results
           path: |
             test-results/
             docs/evidence/
           retention-days: 7
+
+  # ADR-0012 step 3: the installer config must keep working, so a broken electron-builder setup fails a PR
+  # and not the release tag. Builds the unpacked app only (no installer, nothing uploaded).
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run pack
+
+  # The same checks on macOS, where every darwin branch (CLI lookup, ps, osascript, the Dock badge, the window
+  # chrome) runs for real, then the unpacked .app. The Playwright smoke tests stay on Windows: they are tuned to
+  # the Windows window chrome and display, and have not been proven on a macOS runner.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run pack

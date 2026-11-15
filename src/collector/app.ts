@@ -2,16 +2,22 @@ import { createHash } from 'node:crypto'
 import { readdirSync } from 'node:fs'
 import type { Server } from 'node:http'
 import type { ActionResult, Verdict } from '@shared/bridge'
+import type { WorkReq, WorkRes } from '@shared/collector'
 import type { History, SessionDetail } from '@shared/detail'
 import type { Snapshot } from '@shared/snapshot'
+import { DEFAULT_WEEKLY_BUDGET_USD, WEEKLY_BUDGET_MAX_USD } from '@shared/work'
 import { DEFAULT_STALL, type AttentionRecord, type StallConfig } from './attention'
 import type { AgentEvent } from './events'
 import { resolveClaude, run } from './cli'
 import { Holds, faithfulPreview, type AuditRow } from './holds'
 import { normalizeHook } from './normalize'
 import { Poller, exePaths } from './poll'
+import { TaskFollower, WORK_COALESCE_MS, statusesOf, touchesReport, trailing } from './follow'
 import { listen } from './server'
 import { Store } from './store'
+import { parseUsage } from './usage'
+import { UsageLogWatcher, logRoots } from './usage-log'
+import { changesWork, handleWork } from './work'
 
 const PRUNE_EVERY_MS = 6 * 3_600_000
 const AGENT_COUNT_TTL_MS = 60_000
@@ -28,8 +34,16 @@ export interface CollectorOptions {
   /** Settings override for the CLI path (D-024); false turns the poller off (tests). */
   claude: string | undefined | false
   stall?: StallConfig
+  /** The Usage card's bar, from Settings › Claude Code; the default when absent. */
+  weeklyBudgetUsd?: number
+  /** `usage.readLogs` (ADR-0009 amendment): read token counts from Claude Code's local logs. Off unless the user switched it on. */
+  readLogs?: boolean
+  /** The `projects` folders to read; the default is found from CLAUDE_CONFIG_DIR and the home folder. For tests. */
+  usageLogRoots?: readonly string[]
   /** Something the UI shows changed. */
   onChange(): void
+  /** Tasks or the Daily report changed: called once per burst, 400 ms after its first change. */
+  onWorkChange?(): void
   onError(err: unknown): void
 }
 
@@ -45,14 +59,24 @@ export interface Collector {
   setVisible(visible: boolean): void
   setFocused(focused: boolean, at: number): void
   setApprovals(cfg: ApprovalConfig): void
+  /** Dollars a week, from config.json. Anything but a positive number within the settings limit is ignored. */
+  setUsageBudget(usd: number): void
+  /** Turns reading Claude Code's local logs on or off (ADR-0009 amendment). Off stops at once and reads nothing more. */
+  setReadLogs(on: boolean): void
+  /** When Claude Code's usage figures last arrived (ADR-0007), or null if none did in the last 30 days. */
+  lastUsageAt(): number | null
   dismiss(id: string): void
   /** Approve-once or reject one held request. */
   decide(itemId: string, verdict: Verdict): ActionResult
   detail(sessionId: string): SessionDetail | null
   auditLog(limit: number): AuditRow[]
   activity(limit: number): History['activity']
+  /** Tasks and the Daily report. Throws on a database error. */
+  work(req: WorkReq): WorkRes
   close(): Promise<void>
 }
+
+const validBudget = (usd: unknown): number | null => (typeof usd === 'number' && Number.isFinite(usd) && usd > 0 && usd <= WEEKLY_BUDGET_MAX_USD ? usd : null)
 
 const TOO_LATE = 'This request no longer waits in AgentDeck: its time ran out, or it was answered. If its terminal still asks, answer it there.'
 const UNLOGGED = 'AgentDeck could not write this answer to its audit log, so it sent nothing. Answer in its terminal.'
@@ -96,11 +120,36 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
   const stallCfg = o.stall ?? DEFAULT_STALL
   let poller: Poller | null = null
   let approvals: ApprovalConfig = { enabled: false, waitMs: 0 }
+  let budget = validBudget(o.weeklyBudgetUsd) ?? DEFAULT_WEEKLY_BUDGET_USD
+  /** Reads the local logs while `usage.readLogs` is on, off the hook path; null when it is off. */
+  let logs: UsageLogWatcher | null = null
+  const setReadLogs = (on: boolean): void => {
+    if (on === (logs !== null)) return
+    if (!on) {
+      logs?.stop()
+      logs = null
+      o.onChange()
+      return
+    }
+    logs = new UsageLogWatcher({ roots: o.usageLogRoots ?? logRoots(), store: store.usageLog, onChange: () => o.onChange(), onError: o.onError })
+    logs.start()
+    o.onChange()
+  }
+  // Tasks follow their sessions, and main hears about it. The one timer this adds is the coalescing one.
+  const follower = new TaskFollower(store.work, () => store.eodLive().sessions)
+  const workSignal = trailing(WORK_COALESCE_MS, () => o.onWorkChange?.())
+  const openItems = (): string => store.eodLive().attention.map((i) => i.id).join('|')
+  let lastItems = openItems()
   /** Every change may open or close a P1 item, which starts or ends the 1 s poll, or closes a held one. */
   const changed = (): void => {
     holds.releaseClosed((id) => store.isOpen(id))
     poller?.setFastUntil(store.fastPollUntil())
     o.onChange()
+    const items = openItems() // an item that waits on you opened or closed: the report's Needs you moved
+    if (items !== lastItems) {
+      lastItems = items
+      workSignal.poke()
+    }
   }
   const guarded = (fn: () => boolean): void => {
     try {
@@ -123,7 +172,18 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     },
     (row, answered) => guarded(() => (answered ? store.answer(row.itemId, row.ts) : store.setHeld(row.itemId, false, null)))
   )
-  const ingest = (events: AgentEvent[]): void => guarded(() => store.ingest(events))
+  const ingest = (events: AgentEvent[]): void => {
+    const before = statusesOf(store.eodLive().sessions, events)
+    guarded(() => store.ingest(events))
+    try {
+      // After the reply and the commit: tasks follow the sessions they were sent to, then main hears of anything the report shows.
+      const sessions = store.eodLive().sessions
+      const moved = follower.follow(events, before)
+      if (moved || events.some((e) => touchesReport(e) || sessions.get(e.sessionId)?.status !== before.get(e.sessionId))) workSignal.poke()
+    } catch (err) {
+      o.onError(err) // the task keeps its place; the next event tries again
+    }
+  }
   if (o.claude !== false) {
     let cli: string | null = null
     const override = o.claude
@@ -209,10 +269,20 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     return waiting
   }
 
+  /** ADR-0007: a body that is not JSON is reported and dropped; the exporter was already told 200 and does not retry. */
+  const metrics = (raw: string, at: number): void => {
+    try {
+      const points = parseUsage(raw)
+      guarded(() => store.ingestUsage(points, at))
+    } catch (err) {
+      o.onError(err)
+    }
+  }
+
   const snapshot = (): Snapshot => {
     const now = Date.now()
     if (now - agents.at > AGENT_COUNT_TTL_MS) agents = { count: countAgents(o.agentsDir), at: now }
-    return store.snapshot(now, { awaySince: away.since, awayUntil: away.until, agentDefinitionCount: agents.count })
+    return store.snapshot(now, { awaySince: away.since, awayUntil: away.until, agentDefinitionCount: agents.count, weeklyBudgetUsd: budget, usageLogs: logs?.status() })
   }
 
   let server: Server
@@ -227,6 +297,7 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
           queue.push({ raw, at })
           if (queue.length === 1) setImmediate(drain)
         },
+        onMetrics: metrics,
         snapshot
       },
       o.ports
@@ -236,6 +307,7 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     throw err
   }
   poller?.start()
+  setReadLogs(o.readLogs === true)
   poller?.setFastUntil(store.fastPollUntil()) // items reloaded from the database
   const pruner = setInterval(prune, PRUNE_EVERY_MS)
   const stallTimer = setInterval(() => guarded(() => store.tick(Date.now(), stallCfg)), STALL_TICK_MS)
@@ -253,6 +325,14 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
       approvals = cfg
       if (!cfg.enabled) holds.releaseAll() // turned off: what waits goes back to its terminal now
     },
+    setUsageBudget: (usd) => {
+      const next = validBudget(usd)
+      if (next === null || next === budget) return
+      budget = next
+      o.onChange()
+    },
+    setReadLogs,
+    lastUsageAt: () => store.lastUsageAt(),
     dismiss: (id) => guarded(() => store.dismiss(id, Date.now(), stallCfg)),
     decide: (itemId, verdict) => {
       const r = holds.decide(itemId, verdict)
@@ -261,11 +341,18 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     detail: (sessionId) => store.detail(sessionId),
     auditLog: (limit) => store.auditLog(limit),
     activity: (limit) => store.activity(limit),
+    work: (req) => {
+      const res = handleWork(store, req, Date.now(), follower)
+      if (changesWork(req)) workSignal.poke()
+      return res
+    },
     close: async () => {
       holds.releaseAll() // empty replies: the terminals ask instead
       await flush()
+      workSignal.cancel()
       clearInterval(pruner)
       clearInterval(stallTimer)
+      logs?.stop()
       poller?.stop()
       await new Promise<void>((resolve) => {
         server.close(() => resolve())

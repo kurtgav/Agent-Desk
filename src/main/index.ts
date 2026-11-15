@@ -2,31 +2,43 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
-  app, clipboard, dialog, ipcMain, Menu, session, type BrowserWindow, type IpcMainInvokeEvent, type OpenDialogOptions, type Tray
+  app, clipboard, dialog, ipcMain, Menu, session, shell, type BrowserWindow, type IpcMainInvokeEvent, type OpenDialogOptions, type Tray
 } from 'electron'
 import { z } from 'zod'
 import {
-  EFFORTS, IPC, PROMPT_MAX, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
+  EFFORTS, IPC, PROMPT_MAX, SESSION_ACTIONS, type ActionResult, type AgentDef, type AppInfo, type AppStatus, type DispatchResult, type HooksPreview, type HooksResult,
   type RemoteApprovals
 } from '@shared/bridge'
 import type { FromCollector } from '@shared/collector'
+import { ROLE_ID } from '@shared/roles'
+import { MODEL_PATTERN } from '@shared/console'
 import type { History, SessionDetail } from '@shared/detail'
 import type { Session, Snapshot } from '@shared/snapshot'
-import { resolveClaude } from '../collector/cli'
-import { act, LOCAL_PATH, logs, openFile, runClaudeIn, type ActionDeps } from './actions'
+import { loginShellPath, resolveClaude } from '../collector/cli'
+import { act, LOCAL_PATH, logs, openFile, openTargets, runClaudeIn, type ActionDeps } from './actions'
 import { agentList } from './agents'
 import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, remoteApprovals, updateConfig } from './config'
-import { NOT_KNOWN, dispatch, knownFolder, refusal } from './dispatch'
+import { registerClaude } from './claude'
+import { removeTelemetry } from './claude-telemetry-install'
+import { registerConsole } from './console'
+import type { Dispose, MainCtx } from './ctx'
+import { NOT_KNOWN, knownFolder, startDispatch } from './dispatch'
 import { hookOptions, hooksState, install, previewInstall, previewUninstall, shapeFor, uninstall, type HookPaths } from './hooks'
 import { settingsPath, type HookTarget } from './hooks-install'
-import { isPaused, notifyPrefs, tomorrowMorning, type NotifyPrefs } from './notify'
+import { isPaused, notifyPrefs, tomorrowMorning, trayImage, type NotifyPrefs } from './notify'
 import { registerAppScheme, serveRenderer } from './protocol'
+import { noteRole, registerSessionMeta } from './session-meta'
+import { registerRoles, roles } from './roles'
+import { registerSettings } from './settings'
+import { readLogsOn, weeklyBudget } from './settings-model'
 import { Signals } from './signals'
+import { registerToasts } from './toasts'
 import { createTray } from './tray'
 import { createMainWindow, showWindow } from './window'
-import { appTitle } from './window-options'
+import { appTitle, macMenu } from './window-options'
+import { registerWork, workChanged } from './work'
 
 // out/main -> project root (dev) or app.asar root (packaged); works for `electron .` and `electron out/main/index.js`.
 const RESOURCES = join(__dirname, '../../resources')
@@ -38,13 +50,28 @@ const PORTS = Array.from({ length: 11 }, (_, i) => 47821 + i)
 // Test isolation: must precede anything that reads userData, including the single-instance lock.
 const userDataOverride = process.env.AGENTDECK_USER_DATA
 if (userDataOverride) app.setPath('userData', userDataOverride)
-app.setAppUserModelId('com.thirdcode.agentdeck')
+// Windows attributes toasts to this id (ADR-0012, R19); macOS takes the bundle id from the app itself.
+if (process.platform === 'win32') app.setAppUserModelId('com.thirdcode.agentdeck')
+
+/**
+ * macOS starts an app from Finder or the Dock with a bare PATH (no Homebrew, nvm or npm prefix). The login shell's PATH is
+ * read once, before the collector or any action spawns `claude`; child processes inherit it, and cleanEnv still drops every
+ * CLAUDE* variable (ADR-0008). Up to 3 s; on any failure the PATH stays as it was.
+ */
+const pathReady: Promise<void> =
+  process.platform === 'darwin' && !process.argv.includes('--uninstall-integration')
+    ? loginShellPath().then((p) => {
+        if (p) process.env.PATH = p
+      })
+    : Promise.resolve()
 
 let win: BrowserWindow | undefined
 let tray: Tray | undefined // module-level so it is not garbage-collected
 let collector: Supervisor | null = null
 let latest: Snapshot | null = null
 let demo = false
+/** Feature modules (work.ts, settings.ts) hand back what they need stopped on quit. */
+const disposers: Dispose[] = []
 /** The collector's bound port; our hook entries point at it. */
 let port: number | null = null
 let status: AppStatus | null = null
@@ -62,18 +89,35 @@ const signals = new Signals({
   open: focusItem
 })
 
-if (!app.requestSingleInstanceLock()) {
+if (process.argv.includes('--uninstall-integration')) {
+  // The installer's uninstall step (ADR-0012): take our entries out of settings.json and exit without a window.
+  // Our hook entries and our telemetry env entries (ADR-0007: those stay while AgentDeck runs, so only this removes them).
+  // It runs beside a live AgentDeck, so it must not take the single-instance lock.
+  void app.whenReady().then(() => {
+    const r = uninstall(hookPaths())
+    const t = removeTelemetry(hookPaths())
+    if (r.ok) updateConfig(configFile(), { hooksConsent: null, remoteApprovals: { ...approvalsConfig(), enabled: false } })
+    else console.error(`[hooks] uninstall integration: ${r.error}`)
+    if (!t.ok) console.error(`[telemetry] uninstall integration: ${t.error}`)
+    app.exit(r.ok && t.ok ? 0 : 1)
+  })
+} else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   registerAppScheme()
   app.on('second-instance', () => openWindow())
+  // macOS: a click on the Dock icon while the window is hidden. Not before start-up made the first window, or there would be two.
+  app.on('activate', () => {
+    if (win) openWindow()
+  })
   app.on('window-all-closed', () => {
-    // Keep running in the tray: quitting happens only from the tray menu.
+    // Keep running in the tray: quitting happens only from the tray menu (and, on macOS, the app menu's Quit, Cmd+Q).
   })
   let closing = false
   app.on('will-quit', (e) => {
     if (closing) return
     closing = true
+    for (const dispose of disposers.splice(0)) dispose()
     removeHooksForQuit()
     if (!collector) return
     // Quit waits up to 1 s, so held approvals get an empty reply and their audit rows (ADR-0006).
@@ -211,7 +255,8 @@ const actionDeps: ActionDeps = {
     })
     return claudeCli
   },
-  copy: (text) => clipboard.writeText(text)
+  copy: (text) => clipboard.writeText(text),
+  openFolder: (path) => shell.openPath(path)
 }
 
 const SessionId = z.string().min(1).max(128)
@@ -255,14 +300,21 @@ const Dispatch = z.object({
   prompt: z.string().trim().min(1).max(PROMPT_MAX),
   cwd: Folder,
   agent: z.string().min(1).max(64).nullable(),
-  effort: z.enum(EFFORTS)
+  effort: z.enum(EFFORTS),
+  model: z.string().regex(MODEL_PATTERN).nullable().optional(),
+  role: z.string().regex(ROLE_ID).nullable().optional()
 })
 
 async function onDispatch(raw: unknown): Promise<DispatchResult> {
   if (demo) return { ok: false, error: 'Demo data: nothing was dispatched.', untrusted: false }
   const req = Dispatch.parse(raw)
-  const why = await refusal(req, knownFolders(), agentsFor)
-  return why ? { ok: false, error: why, untrusted: false } : dispatch(req, actionDeps)
+  return startDispatch(req, {
+    known: knownFolders,
+    agentsIn: agentsFor,
+    actions: actionDeps,
+    roles,
+    remember: (keys, role) => noteRole(configFile(), keys, role, Date.now())
+  })
 }
 
 async function onChooseFolder(): Promise<string | null> {
@@ -319,7 +371,9 @@ function startCollector(): void {
       ports: PORTS,
       agentsDir: join(configDir(), 'agents'),
       // AGENTDECK_POLL=0: smoke tests must not list the real sessions on the machine running them.
-      claude: process.env.AGENTDECK_POLL === '0' ? false : typeof config.claudePath === 'string' ? config.claudePath : undefined
+      claude: process.env.AGENTDECK_POLL === '0' ? false : typeof config.claudePath === 'string' ? config.claudePath : undefined,
+      weeklyBudgetUsd: weeklyBudget(config),
+      readLogs: !demo && readLogsOn(config)
     },
     onCollectorMessage,
     onCollectorDown
@@ -345,6 +399,8 @@ function onCollectorMessage(m: FromCollector): void {
     latest = m.snapshot
     if (win && !win.isDestroyed()) win.webContents.send(IPC.snapshotPush, m.snapshot)
     signals.update(m.snapshot)
+  } else if (m.type === 'work-changed') {
+    workChanged()
   } else if (m.type === 'error') {
     console.error(`[collector] ${m.message}`)
   }
@@ -422,11 +478,11 @@ function setDemo(on: boolean): void {
 
 function start(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  // Packaged builds drop the default menu, whose accelerators include DevTools and Reload.
-  if (app.isPackaged) Menu.setApplicationMenu(null)
+  // Packaged builds drop the default menu, whose accelerators include DevTools and Reload. macOS keeps a menu of standard roles.
+  if (app.isPackaged) Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate(macMenu()) : null)
   serveRenderer(RENDERER_ROOT)
   demo = readConfig(configFile()).demo === true
-  handle(IPC.appInfo, (): AppInfo => ({ version: app.getVersion(), demo }))
+  handle(IPC.appInfo, (): AppInfo => ({ version: app.getVersion(), demo, platform: process.platform }))
   handle(IPC.snapshot, (): Snapshot | null => (demo ? null : latest))
   handle(IPC.setDemo, (_e, on) => setDemo(z.boolean().parse(on)))
   handle(IPC.status, (): AppStatus => status ?? refreshStatus())
@@ -441,8 +497,9 @@ function start(): void {
   handle(IPC.history, () => history())
   handle(IPC.act, async (_e, action, id) => {
     const s = await sessionFor(SessionId.parse(id))
-    return s ? act(z.enum(['attach', 'stop', 'open-folder', 'open-desktop', 'copy-resume']).parse(action), s, actionDeps) : UNKNOWN
+    return s ? act(z.enum(SESSION_ACTIONS).parse(action), s, actionDeps) : UNKNOWN
   })
+  handle(IPC.getOpenTargets, () => openTargets())
   handle(IPC.logs, async (_e, id) => {
     const s = await sessionFor(SessionId.parse(id))
     return s ? logs(s, actionDeps) : UNKNOWN
@@ -452,13 +509,23 @@ function start(): void {
   handle(IPC.chooseFolder, onChooseFolder)
   handle(IPC.runClaudeIn, (_e, cwd) => onRunClaudeIn(cwd))
   handle(IPC.listAgents, (_e, cwd) => agentsFor(Folder.nullable().parse(cwd)))
+  const ctx: MainCtx = { handle, collector: () => collector, demo: () => demo, configFile, userData: () => app.getPath('userData'), window: () => win ?? null }
+  disposers.push(registerWork(ctx), registerSettings(ctx), registerRoles(ctx), registerSessionMeta(ctx), registerToasts(ctx), registerClaude(ctx), registerConsole(ctx, { command: async () => { const file = await actionDeps.claude(); return file ? { file, args: [] } : null }, knownFolders }))
   registerAutostartOnce(configFile())
 
-  win = newWindow(process.argv.includes('--hidden'))
-  tray = createTray(join(RESOURCES, 'tray.png'), appTitle(demo), { open: openWindow, quit: () => app.quit() })
+  win = newWindow(startHidden())
+  tray = createTray(join(RESOURCES, `${trayImage('tray')}.png`), appTitle(demo), { open: openWindow, quit: () => app.quit() })
   const p = prefs()
   if (isPaused(p, Date.now())) resumeTimer = setTimeout(refreshStatus, p.pausedUntil! - Date.now())
-  if (!demo) startCollector()
+  void pathReady.then(() => {
+    if (!demo && !collector) startCollector()
+  })
+}
+
+/** `--hidden` (ADR-0012's "start minimized"). macOS hands a login item no arguments, so there the stored choice decides. */
+function startHidden(): boolean {
+  if (process.argv.includes('--hidden')) return true
+  return process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin && readConfig(configFile()).startMinimized === true
 }
 
 /** ADR-0012: register the login item on the first packaged run only; never the dev electron.exe. */
@@ -469,7 +536,8 @@ function registerAutostartOnce(configFile: string): void {
 }
 
 function showTrayHintOnce(configFile: string): void {
-  if (!tray || readConfig(configFile).trayHintShown === true) return
+  // A balloon is Windows-only; on macOS an app that stays in the Dock after its window closes is the norm.
+  if (!tray || process.platform !== 'win32' || readConfig(configFile).trayHintShown === true) return
   tray.displayBalloon({
     title: 'AgentDeck is still running',
     content: 'It keeps watching your agents from the tray. Quit from the tray menu.'

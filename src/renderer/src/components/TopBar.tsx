@@ -1,69 +1,16 @@
-import type { ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ChevronRight, Ellipsis, House, Plus, Search } from 'lucide-react'
+import { Bell, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { PauseChoice } from '@shared/bridge'
-import { HOME, useUi } from '@/store'
-import { projectName, running } from '@/lib/selectors'
-import { Avatar } from './Avatar'
+import { useUi, type Nav } from '@/store'
+import { projectName } from '@/lib/selectors'
+import { findEntry } from '@/lib/sessionList'
 import { IntegrationDialog } from './Integration'
 import { PAGE_TITLE } from './pages/Page'
-import { focusComposer } from './Sidebar'
-import { Button, Hint, IconButton, PendingMenuItem, cn, type Milestone } from './ui'
-
-const MENU_ITEMS: [string, Milestone][] = [
-  ['Diagnostics', 'M5'],
-  ['Settings', 'M5']
-]
-
-const ITEM = 'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none data-[highlighted]:bg-ground'
-const clock = (t: number): string => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
-type Tone = 'done' | 'idle' | 'failed'
-
-function Chip({ tone, children }: { tone: Tone; children: ReactNode }) {
-  return (
-    <>
-      <span className="size-1.5 rounded-full" style={{ background: `var(--${tone})` }} aria-hidden />
-      {children}
-    </>
-  )
-}
-const CHIP = 'inline-flex h-[26px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium'
-const tint = (tone: Tone) => ({ background: `var(--${tone}-bg)`, color: `var(--${tone}-ink)` })
-
-/** UI_MAP Live chip: Live / Paused / Hooks missing (click to repair). Live mode only; NotLive covers a stopped collector. */
-function LiveChip({ onRepair }: { onRepair: () => void }) {
-  const status = useUi((s) => s.status)
-  const link = useUi((s) => s.link)
-  const now = useUi((s) => s.now)
-  if (!status || link !== 'up') return null
-  if (status.hooks !== 'installed' || status.conflicts.length > 0) {
-    const why = status.hooks === 'error' ? status.hooksError : status.conflicts[0] ?? 'Sessions are not reporting to AgentDeck yet.'
-    return (
-      <Hint label={`${why} Click to repair.`}>
-        <button type="button" onClick={onRepair} style={tint('failed')} className={cn(CHIP, 'transition-transform duration-150 ease-out active:scale-[0.96]')}>
-          <Chip tone="failed">Hooks missing</Chip>
-        </button>
-      </Hint>
-    )
-  }
-  if (status.pausedUntil !== null && now < status.pausedUntil) {
-    return (
-      <Hint label={`Notifications paused until ${clock(status.pausedUntil)}. Resume from the ⋯ menu.`}>
-        <span tabIndex={0} style={tint('idle')} className={CHIP}>
-          <Chip tone="idle">Paused</Chip>
-        </span>
-      </Hint>
-    )
-  }
-  return (
-    <Hint label="Hooks installed. Your sessions report to AgentDeck as they work.">
-      <span tabIndex={0} style={tint('done')} className={CHIP}>
-        <Chip tone="done">Live</Chip>
-      </span>
-    </Hint>
-  )
-}
+import { openSettings } from './settings/actions'
+import { useEntries } from './shell/useEntries'
+import { DemoChip, LiveChip, clock } from './StatusChips'
+import { ThemeButton } from './ThemeButton'
+import { Hint, IconButton, menuItem, menuPanel, menuSeparator } from './ui'
 
 function PauseMenu() {
   const status = useUi((s) => s.status)
@@ -73,7 +20,7 @@ function PauseMenu() {
   const pause = (c: PauseChoice | null): void => void window.agentdeck?.pauseNotifications(c).catch(() => undefined)
   return (
     <Menu.Sub>
-      <Menu.SubTrigger className={ITEM}>
+      <Menu.SubTrigger className={menuItem}>
         <span className="flex flex-col">
           <span>{paused ? 'Notifications paused' : 'Pause notifications'}</span>
           {paused && <span className="text-[12px] text-muted">Until {clock(status.pausedUntil!)}</span>}
@@ -81,16 +28,16 @@ function PauseMenu() {
         <ChevronRight size={14} strokeWidth={1.75} className="ml-auto text-muted" />
       </Menu.SubTrigger>
       <Menu.Portal>
-        <Menu.SubContent sideOffset={6} className="z-50 min-w-48 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
+        <Menu.SubContent sideOffset={6} className={menuPanel}>
           {paused && (
-            <Menu.Item className={ITEM} onSelect={() => pause(null)}>
+            <Menu.Item className={menuItem} onSelect={() => pause(null)}>
               Resume now
             </Menu.Item>
           )}
-          <Menu.Item className={ITEM} onSelect={() => pause('hour')}>
+          <Menu.Item className={menuItem} onSelect={() => pause('hour')}>
             For 1 hour
           </Menu.Item>
-          <Menu.Item className={ITEM} onSelect={() => pause('tomorrow')}>
+          <Menu.Item className={menuItem} onSelect={() => pause('tomorrow')}>
             Until tomorrow, 08:00
           </Menu.Item>
         </Menu.SubContent>
@@ -99,132 +46,105 @@ function PauseMenu() {
   )
 }
 
-function ActiveAgents() {
-  const active = running(useUi((s) => s.snapshot))
-  const go = useUi((s) => s.go)
-  const shown = active.slice(0, 3)
-  const more = active.length - shown.length
-  if (!active.length) return null
+/** The trail the page sits on: Sessions › its project for a filtered list, a session's project, otherwise just the page. */
+export function trailFor(nav: Nav, project: string): string[] {
+  if (nav.page === 'session') return [PAGE_TITLE.sessions, project || PAGE_TITLE.session]
+  if (nav.page === 'sessions' && nav.project) return [PAGE_TITLE.sessions, projectName(nav.project)]
+  return [PAGE_TITLE[nav.page]]
+}
+
+/** Back and forward through where you have been (Alt+Left, Alt+Right). */
+function History() {
+  const canBack = useUi((s) => s.canBack)
+  const canForward = useUi((s) => s.canForward)
+  const back = useUi((s) => s.back)
+  const forward = useUi((s) => s.forward)
   return (
-    <Hint label={`${active.length} active sessions. Show them in Sessions.`}>
-      <button
-        type="button"
-        aria-label={`${active.length} active sessions`}
-        onClick={() => go({ page: 'sessions', active: true })}
-        className="flex items-center rounded-full p-0.5 transition-[background-color] duration-150 hover:bg-active"
-      >
-        {shown.map((x, i) => (
-          <span key={x.id} className={i ? '-ml-1.5' : ''}>
-            <span className="grid size-7 place-items-center rounded-full bg-surface">
-              <Avatar seed={x.name} size={22} />
-            </span>
-          </span>
-        ))}
-        {more > 0 && (
-          <span className="-ml-1.5 grid size-7 place-items-center rounded-full border-2 border-surface bg-well text-[11px] font-semibold tabular-nums text-muted">
-            +{more}
-          </span>
-        )}
-      </button>
-    </Hint>
+    <div className="app-no-drag flex flex-none items-center">
+      <Hint label="Back (Alt Left)">
+        <IconButton aria-label="Back" aria-keyshortcuts="Alt+ArrowLeft" disabled={!canBack} onClick={back} className="size-7">
+          <ChevronLeft size={16} strokeWidth={1.75} />
+        </IconButton>
+      </Hint>
+      <Hint label="Forward (Alt Right)">
+        <IconButton aria-label="Forward" aria-keyshortcuts="Alt+ArrowRight" disabled={!canForward} onClick={forward} className="size-7">
+          <ChevronRight size={16} strokeWidth={1.75} />
+        </IconButton>
+      </Hint>
+    </div>
   )
 }
 
-/** UI_MAP § Top bar: Home, then the list page, then the project a Sessions list is filtered to. */
 function Breadcrumb() {
   const nav = useUi((s) => s.nav)
   const go = useUi((s) => s.go)
-  const trail = [PAGE_TITLE[nav.page], ...(nav.page === 'sessions' && nav.project ? [projectName(nav.project)] : [])]
+  const entry = findEntry(useEntries(), nav.session)
+  const trail = trailFor(nav, nav.page === 'session' ? (entry?.project ?? '') : '')
   return (
-    <nav aria-label="Breadcrumb" className="app-no-drag flex min-w-0 items-center gap-1.5 text-[14px] font-medium">
-      <House size={16} strokeWidth={1.75} className="flex-none text-muted" />
-      {nav.page === 'home' ? (
-        <span aria-current="page">Home</span>
-      ) : (
-        <>
-          <button type="button" onClick={() => go(HOME)} className="rounded-md px-1 text-muted transition-colors duration-150 hover:text-ink">
-            Home
-          </button>
-          {trail.map((t, i) => (
-            <span key={i} className="flex min-w-0 items-center gap-1.5">
-              <ChevronRight size={14} strokeWidth={1.75} className="flex-none text-muted" aria-hidden />
-              {i === trail.length - 1 ? (
-                <span aria-current="page" className="truncate">{t}</span>
-              ) : (
-                <button type="button" onClick={() => go({ page: nav.page })} className="truncate rounded-md px-1 text-muted transition-colors duration-150 hover:text-ink">
-                  {t}
-                </button>
-              )}
+    <nav aria-label="Breadcrumb" className="app-no-drag flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[14px] font-medium">
+      {trail.map((t, i) => (
+        <span key={i} className="flex min-w-0 items-center gap-1.5">
+          {i > 0 && <ChevronRight size={14} strokeWidth={1.75} className="flex-none text-muted" aria-hidden />}
+          {i === trail.length - 1 ? (
+            <span aria-current="page" className="max-w-[32ch] truncate">
+              {t}
             </span>
-          ))}
-        </>
-      )}
+          ) : (
+            <button type="button" onClick={() => go({ page: nav.page === 'session' ? 'sessions' : nav.page })} className="rounded-md px-1 text-muted transition-colors hover:text-ink">
+              {t}
+            </button>
+          )}
+        </span>
+      ))}
     </nav>
   )
 }
 
+/**
+ * Slim on purpose (IA § 7): where you are, then the things that are about the whole app: the theme, whether sessions are reporting,
+ * and the notifications menu. New session and Search live in the sidebar, once.
+ */
 export function TopBar() {
-  const mode = useUi((s) => s.snapshot.mode)
   const live = useUi((s) => s.status !== null)
   const dialog = useUi((s) => s.integration)
   const setDialog = useUi((s) => s.setIntegration)
-  const openPalette = useUi((s) => s.setPalette)
   return (
-    <header className="app-drag caption-inset flex h-12 flex-none items-center gap-3 border-b border-line bg-surface pl-4">
+    <header className="app-drag caption-inset flex h-12 flex-none items-center gap-2 border-b border-line bg-surface pl-3">
+      <History />
       <Breadcrumb />
-
-      <div className="flex flex-1 justify-center">
-        <button
-          type="button"
-          aria-keyshortcuts="Control+K"
-          onClick={() => openPalette(true)}
-          className="app-no-drag flex h-8 w-[300px] items-center gap-2 rounded-full bg-well px-3 text-[13px] text-muted transition-[background-color,color] duration-150 hover:bg-active hover:text-ink"
-        >
-          <Search size={14} strokeWidth={1.75} />
-          Search sessions, projects, files
-          <kbd className="ml-auto font-sans text-[12px]">Ctrl K</kbd>
-        </button>
-      </div>
-
-      <div className="app-no-drag flex items-center gap-2">
-        {mode === 'demo' && (
-          <Hint label="Sample sessions, not yours. Turn off under Third Code › Demo data.">
-            {/* Focusable so keyboard users can reach the explanation in the tooltip. */}
-            <span tabIndex={0} className="inline-flex h-[26px] items-center gap-1.5 rounded-full bg-[var(--needs-bg)] px-2.5 text-[12px] font-medium text-[var(--needs-ink)]">
-              <span className="size-1.5 rounded-full bg-[var(--needs)]" aria-hidden />
-              Demo data
-            </span>
-          </Hint>
-        )}
+      <div className="flex-1" />
+      <div className="app-no-drag flex flex-none items-center gap-2">
+        <DemoChip />
         <LiveChip onRepair={() => setDialog('install')} />
-        <ActiveAgents />
-        <Button onClick={focusComposer}>
-          <Plus size={15} strokeWidth={1.75} />
-          New task
-        </Button>
+        <ThemeButton />
         <Menu.Root>
-          <Menu.Trigger asChild>
-            <IconButton aria-label="More">
-              <Ellipsis size={16} strokeWidth={1.75} />
-            </IconButton>
-          </Menu.Trigger>
+          <Hint label="Notifications and integration">
+            <Menu.Trigger asChild>
+              <IconButton aria-label="Notifications and integration">
+                <Bell size={16} strokeWidth={1.75} />
+              </IconButton>
+            </Menu.Trigger>
+          </Hint>
           <Menu.Portal>
-            <Menu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-tile border border-line bg-surface p-1 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.10)]">
+            <Menu.Content align="end" sideOffset={6} className={menuPanel}>
               <PauseMenu />
               {live && (
-                <Menu.Item className={ITEM} onSelect={() => setDialog('install')}>
+                <Menu.Item className={menuItem} onSelect={() => setDialog('install')}>
                   Remote approvals…
                 </Menu.Item>
               )}
               {live && (
-                <Menu.Item className={ITEM} onSelect={() => setDialog('uninstall')}>
+                <Menu.Item className={menuItem} onSelect={() => setDialog('uninstall')}>
                   Uninstall integration…
                 </Menu.Item>
               )}
-              {live && <Menu.Separator className="my-1 h-px bg-rule" />}
-              {MENU_ITEMS.map(([label, m]) => (
-                <PendingMenuItem key={label} label={label} m={m} />
-              ))}
+              {live && <Menu.Separator className={menuSeparator} />}
+              <Menu.Item className={menuItem} onSelect={() => openSettings('diagnostics')}>
+                Diagnostics
+              </Menu.Item>
+              <Menu.Item className={menuItem} onSelect={() => openSettings()}>
+                Settings
+              </Menu.Item>
             </Menu.Content>
           </Menu.Portal>
         </Menu.Root>

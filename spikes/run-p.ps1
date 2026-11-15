@@ -10,9 +10,9 @@ $env:OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = 'http://127.0.0.1:47822/v1/metrics'
 $env:OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = 'http://127.0.0.1:47822/v1/logs'
 $env:OTEL_LOGS_EXPORT_INTERVAL = '1000'
 $env:OTEL_METRIC_EXPORT_INTERVAL = '2000'
-$out = "D:\personal\agentdeck\spikes\out"
+$out = Join-Path $PSScriptRoot 'out'
 New-Item -ItemType Directory -Force $out | Out-Null
-Set-Location D:\personal\agentdeck\spikes\scratch
+Set-Location (Join-Path $PSScriptRoot 'scratch')
 $cliArgs = @('-p', '--model', 'haiku', '--no-session-persistence', '--permission-mode', 'default',
   '--setting-sources', 'local', '--output-format', 'json')
 if ($DebugLog) { $cliArgs += @('--debug-file', "$out\$Label.debug.log") }

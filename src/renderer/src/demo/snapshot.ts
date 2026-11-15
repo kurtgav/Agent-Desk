@@ -1,5 +1,7 @@
 import type { AuditRow, History, SessionDetail } from '@shared/detail'
+import { EMPTY_META, type SessionMetaState } from '@shared/session-meta'
 import type { ChangedFile, Session, Snapshot } from '@shared/snapshot'
+import { startOfDay } from '@/lib/work'
 
 /**
  * Demo data for M1 (ADR-0011, D-031): sample sessions shaped like the S1 fixtures, with
@@ -49,6 +51,8 @@ const TURNS = [12, 23, 38, 51, 67, 88, 130, 178, 240, 300, 420, 610, 760, 900, 1
 
 export function demoSnapshot(now: number): Snapshot {
   const ago = (minutes: number): number => Math.round(now - minutes * MIN)
+  // A session that stopped a couple of hours ago stopped today, even when the demo is opened just after midnight (the Done today lane).
+  const stoppedToday = (minutes: number): number => Math.max(ago(minutes), startOfDay(now) + MIN)
   const files: ChangedFile[] = EDITS.map(([project, rel, sessionId, tool, min]) => ({
     path: `${PATHS[project]}\\${rel}`,
     sessionId,
@@ -91,7 +95,7 @@ export function demoSnapshot(now: number): Snapshot {
       },
       {
         id: 's-invoice', bgId: 'e4b81f07', name: 'invoice-pdf', cwd: PATHS.billing, surface: 'background',
-        status: 'failed', startedAt: ago(190), lastEventAt: ago(125), activity: 'Stopped: rate limit',
+        status: 'failed', startedAt: ago(190), lastEventAt: stoppedToday(125), activity: 'Stopped: rate limit',
         plan: { done: 2, total: 4 }, waitingSince: null, subagents: []
       },
       {
@@ -132,7 +136,7 @@ export function demoSnapshot(now: number): Snapshot {
     week: { agentTimeMs: (14 * 60 + 25) * MIN, agentTimeLastWeekMs: (11 * 60 + 50) * MIN, finishedTurns: TURNS.map(ago) },
     usage: { todayTokens: 1_840_000, weekTokens: 9_620_000, todayCostUsd: 4.12, weekCostUsd: 23.8, weeklyBudgetUsd: 40 },
     recentAgentTypes: ['Explore', 'Plan', 'code-reviewer', 'tdd-guide'],
-    agentDefinitionCount: 24
+    agentDefinitionCount: 4 // the Agents page lists the same four in demo, so the sidebar count must match
   }
 }
 
@@ -154,12 +158,31 @@ export function demoHistory(snapshot: Snapshot): History {
     .flatMap((s) => demoDetail(s, snapshot).timeline.map((e) => ({ ...e, sessionId: s.id })))
     .sort((a, b) => b.ts - a.ts)
   const at = snapshot.generatedAt
-  const row = (sessionId: string, title: string, outcome: AuditRow['outcome'], minutes: number, waitSec: number): AuditRow => ({
+  // A sample digest in the real shape (SHA-256, 64 hex digits), so the sample rows read like real ones; the page says they are samples.
+  const row = (sessionId: string, title: string, outcome: AuditRow['outcome'], minutes: number, waitSec: number, inputHash: string): AuditRow => ({
     ts: Math.round(at - minutes * MIN), requestedAt: Math.round(at - minutes * MIN - waitSec * 1000), itemId: `${sessionId}-${minutes}`,
-    sessionId, agentId: null, toolName: 'Bash', title, riskFlags: [], inputHash: 'demo', outcome
+    sessionId, agentId: null, toolName: 'Bash', title, riskFlags: [], inputHash, outcome
   })
   return {
     activity,
-    audit: [row('s-auth', 'Run `npm test -- auth`', 'approved', 14, 6), row('s-seo', 'Run `npx lighthouse https://example.com/pricing`', 'timed-out', 190, 60)]
+    audit: [
+      row('s-auth', 'Run `npm test -- auth`', 'approved', 14, 6, '9f2c41a7d85e03b6c1f47a92e8d05b3a6c7e14f90d2a85b3c6e1f7a40d9b2c58'),
+      row('s-seo', 'Run `npx lighthouse https://example.com/pricing`', 'timed-out', 190, 60, '3b7e90c4a1d62f58e0b9473ca6d15f82e7c04a9b31d6f58c2e07a94b1d3c6f80')
+    ]
+  }
+}
+
+/** The notes the sample sessions carry (demo only, in memory): a pin, a name you gave one, the role each was started as, one unread mark. */
+export function demoSessionMeta(): SessionMetaState {
+  return {
+    ...EMPTY_META,
+    sessions: {
+      's-deck': { pinned: true, role: 'frontend-developer' },
+      's-auth': { role: 'test-automation-engineer' },
+      's-billing': { unread: true, role: 'cto' },
+      's-booking': { alias: 'Booking form for the dental client', role: 'ui-designer' },
+      's-invoice': { role: 'backend-architect' },
+      's-seo': { role: 'seo-specialist' }
+    }
   }
 }

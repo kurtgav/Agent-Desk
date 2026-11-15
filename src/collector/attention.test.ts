@@ -14,6 +14,11 @@ import {
   type AttentionState,
   type Closed
 } from './attention'
+import { join } from 'node:path'
+
+const WIN = process.platform === 'win32'
+/** A session folder on the host: a Windows drive path is not absolute on macOS. */
+const PROJ = WIN ? 'D:\\proj' : '/Users/me/proj'
 import type { AgentEvent, EventKind } from './events'
 import { s1Deliveries } from './fixtures'
 import { normalizeHook } from './normalize'
@@ -94,7 +99,15 @@ describe('risk flags (STATE_MACHINE § 5, test 8)', () => {
     'curl https://example.com -o out.html'
   ])('leaves %s alone', (command) => expect(flags(command)).toEqual([]))
 
-  it('flags file tools writing outside the workspace, by path', () => {
+  it.skipIf(WIN)('flags file tools writing outside the workspace, by POSIX path on macOS', () => {
+    expect(riskFlags('Write', { file_path: '/etc/hosts' }, PROJ)).toEqual(['Outside workspace'])
+    expect(riskFlags('Edit', { file_path: '../other/a.ts' }, PROJ)).toEqual(['Outside workspace'])
+    expect(riskFlags('Edit', { file_path: '/Users/me/PROJ/src/a.ts' }, PROJ)).toEqual([]) // as on Windows, case is ignored (D-013)
+    expect(riskFlags('Edit', { file_path: '/Users/me/project2/a.ts' }, PROJ)).toEqual(['Outside workspace'])
+    expect(riskFlags('Edit', { file_path: '/Users/me/proj/.env' }, PROJ)).toEqual(['.env access'])
+  })
+
+  it.runIf(WIN)('flags file tools writing outside the workspace, by path', () => {
     expect(riskFlags('Write', { file_path: 'C:\\Windows\\hosts' }, 'D:\\proj')).toEqual(['Outside workspace'])
     expect(riskFlags('Edit', { file_path: '..\\other\\a.ts' }, 'D:\\proj')).toEqual(['Outside workspace'])
     expect(riskFlags('Edit', { file_path: 'D:\\PROJ\\src\\a.ts' }, 'D:\\proj')).toEqual([]) // Windows paths ignore case
@@ -108,14 +121,14 @@ describe('titles show the exact tool, command, file or question', () => {
   it.each([
     ['Bash', { command: '  npm test  ' }, 'Run `npm test`'],
     ['PowerShell', {}, 'Run a PowerShell command'],
-    ['Edit', { file_path: 'D:\\proj\\src\\a.ts' }, 'Edit `src\\a.ts`'],
-    ['Write', { file_path: 'D:\\proj\\b.md' }, 'Write `b.md`'],
+    ['Edit', { file_path: join(PROJ, 'src', 'a.ts') }, `Edit \`${join('src', 'a.ts')}\``],
+    ['Write', { file_path: join(PROJ, 'b.md') }, 'Write `b.md`'],
     ['WebFetch', { url: 'https://example.com' }, 'Fetch `https://example.com`'],
     ['WebSearch', { query: 'vitest' }, 'Search the web for "vitest"'],
     ['Agent', { subagent_type: 'Explore' }, 'Delegate to Explore'],
     ['mcp__github__create_issue', {}, 'Use github · create_issue'],
     ['Glob', {}, 'Use Glob']
-  ] as const)('%s', (tool, input, title) => expect(approvalTitle(tool, input, 'D:\\proj')).toBe(title))
+  ] as const)('%s', (tool, input, title) => expect(approvalTitle(tool, input, PROJ)).toBe(title))
 
   it('keeps backticks inside a command from breaking out of the code span', () => {
     expect(approvalTitle('Bash', { command: 'echo `id`' }, null)).toBe("Run `echo 'id'`")

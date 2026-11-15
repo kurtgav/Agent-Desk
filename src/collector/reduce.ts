@@ -6,7 +6,7 @@ import { ulid, type AgentEvent } from './events'
 /** STATE_MACHINE § 1: hook events win over the poll for this long after they arrive. */
 export const HOOK_PRECEDENCE_MS = 5_000
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
+export const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 const DELEGATE_TOOLS = new Set(['Agent', 'Task'])
 
 export interface Inflight {
@@ -386,6 +386,7 @@ export function toSession(s: SessionState): Session {
     activity: s.activity,
     plan: ids.length ? { done, total: ids.length } : null,
     waitingSince: s.waitingSince,
+    ...(s.pid ? { pid: s.pid } : {}),
     subagents: s.agents.map((a) => ({ id: a.id, agentType: a.agentType, task: a.task, activity: a.activity, startedAt: a.startedAt }))
   }
 }

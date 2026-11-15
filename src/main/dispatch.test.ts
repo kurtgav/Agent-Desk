@@ -25,6 +25,13 @@ describe('dispatchArgs (brief § Composer)', () => {
     expect(dispatchArgs(req(), 'n-1', false)).not.toContain('--agent')
   })
 
+  it('adds --model before --effort, and only when one was chosen', () => {
+    expect(dispatchArgs(req({ model: 'opus' }), 'n-1', false)).toEqual(['--bg', '--name', 'n-1', '--model', 'opus', '--effort', 'high', 'Fix the flaky login test'])
+    expect(dispatchArgs(req({ agent: 'code-reviewer', model: 'claude-opus-4-5[1m]' }), 'n-1', false).slice(3, 8)).toEqual(['--agent', 'code-reviewer', '--model', 'claude-opus-4-5[1m]', '--effort'])
+    expect(dispatchArgs(req({ model: null }), 'n-1', false)).not.toContain('--model')
+    expect(dispatchArgs(req(), 'n-1', false)).not.toContain('--model')
+  })
+
   it('never lets the prompt read as an option', () => {
     expect(dispatchArgs(req({ prompt: '--dangerously-skip-permissions' }), 'n', false).at(-1)).toBe(' --dangerously-skip-permissions')
   })
@@ -77,6 +84,8 @@ describe('refusal (ADR-0010: main checks what the page sends)', () => {
     expect(await refusal(req({ cwd: '\\\\host\\share' }), ['\\\\host\\share'], agents)).toBe(NOT_LOCAL)
     expect(await refusal(req({ cwd: dir }), ['D:\\other'], agents)).toBe(NOT_KNOWN)
     expect(await refusal(req({ cwd: dir, agent: 'made-up' }), [dir], agents)).toMatch(/no subagent named made-up/)
+    expect(await refusal(req({ cwd: dir, model: 'sonnet' }), [dir], agents)).toBeNull()
+    for (const model of ['--dangerously-skip-permissions', '-x', 'a b', 'x;y', '']) expect(await refusal(req({ cwd: dir, model }), [dir], agents), model).toBe('That model name is not valid.')
   })
 })
 

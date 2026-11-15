@@ -48,6 +48,15 @@ function send(method: string, path: string, body = '', headers: Record<string, s
 }
 const hook = (body: unknown) => send('POST', '/hooks', typeof body === 'string' ? body : JSON.stringify(body))
 
+describe('tasks and the Daily report', () => {
+  it('answers a work request from the store the hooks fill', () => {
+    const added = collector.work({ kind: 'tasks.add', input: { title: 'Check the report', project: null } })
+    expect(added).toMatchObject({ kind: 'task', result: { ok: true, task: { title: 'Check the report', status: 'todo' } } })
+    expect(collector.work({ kind: 'tasks.list' })).toMatchObject({ kind: 'tasks', tasks: [{ title: 'Check the report' }] })
+    expect(collector.work({ kind: 'eod.get', day: '2026-11-13' })).toMatchObject({ kind: 'eod', report: { day: '2026-11-13' } })
+  })
+})
+
 describe('endpoint security (ADR-0010)', () => {
   it('rejects a missing or wrong token', async () => {
     expect((await send('GET', '/health', '', { 'x-agentdeck-token': '' })).status).toBe(401)
@@ -250,6 +259,7 @@ describe('remote approvals over HTTP (ADR-0006 acceptance)', () => {
 describe('poller wiring, with a stand-in `claude` CLI (code review: app.ts untested with the poller on)', () => {
   let dir2: string
   let live: Collector | null = null
+  const CLAUDE_SHIM = process.platform === 'win32' ? 'claude.cmd' : 'claude'
 
   beforeAll(() => {
     dir2 = mkdtempSync(join(tmpdir(), 'agentdeck-cli-'))
@@ -260,7 +270,9 @@ describe('poller wiring, with a stand-in `claude` CLI (code review: app.ts untes
 if (process.argv[2] === '--version') process.stdout.write('2.1.318 (Claude Code)\\n')
 else process.stdout.write(readFileSync(new URL('./rows.json', import.meta.url), 'utf8'))`
     )
-    writeFileSync(join(dir2, 'claude.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0fake-claude.mjs" %*\r\n`)
+    // On macOS a shell script, as npm's own shim is there.
+    if (process.platform === 'win32') writeFileSync(join(dir2, CLAUDE_SHIM), `@echo off\r\n"${process.execPath}" "%~dp0fake-claude.mjs" %*\r\n`)
+    else writeFileSync(join(dir2, CLAUDE_SHIM), `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/fake-claude.mjs" "$@"\n`, { mode: 0o755 })
   })
   afterAll(async () => {
     await live?.close()
@@ -276,7 +288,7 @@ else process.stdout.write(readFileSync(new URL('./rows.json', import.meta.url), 
     store.close()
     writeFileSync(join(dir2, 'rows.json'), JSON.stringify([{ sessionId: 'still-here', kind: 'interactive', status: 'busy', cwd: 'D:\\p', name: 'web', startedAt: before }]))
 
-    live = await startCollector({ dbPath, token: TOKEN, ports: [0], agentsDir: null, claude: join(dir2, 'claude.cmd'), onChange: () => undefined, onError })
+    live = await startCollector({ dbPath, token: TOKEN, ports: [0], agentsDir: null, claude: join(dir2, CLAUDE_SHIM), onChange: () => undefined, onError })
     await vi.waitFor(
       () => {
         const byId = new Map(live!.snapshot().sessions.map((s) => [s.id, s]))
@@ -287,4 +299,111 @@ else process.stdout.write(readFileSync(new URL('./rows.json', import.meta.url), 
     )
     expect(onError).not.toHaveBeenCalled()
   }, 30_000)
+})
+
+describe('tasks and the report follow the sessions', () => {
+  let c: Collector
+  const onWork = vi.fn()
+  const errors = vi.fn()
+  const post = (body: unknown): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const req = request(
+        { host: '127.0.0.1', port: c.port, method: 'POST', path: '/hooks', headers: { 'x-agentdeck-token': TOKEN, 'content-type': 'application/json' } },
+        (res) => {
+          res.resume()
+          res.on('end', () => resolve(res.statusCode ?? 0))
+        }
+      )
+      req.on('error', reject)
+      req.end(JSON.stringify(body))
+    })
+  const tasks = (): { id: string; status: string; sessionName: string | null; doneAt: number | null }[] => {
+    const res = c.work({ kind: 'tasks.list' })
+    return res.kind === 'tasks' ? res.tasks : []
+  }
+  const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+  beforeAll(async () => {
+    c = await startCollector({ dbPath: ':memory:', token: TOKEN, ports: [0], agentsDir: null, claude: false, onChange: () => undefined, onWorkChange: onWork, onError: errors })
+  })
+  afterAll(() => c.close())
+
+  it('tells main once for a burst of events, 400 ms after the first, and not for events that change nothing it shows', async () => {
+    const session_id = 'burst-1'
+    const sent = Date.now()
+    await post({ ...fixture('UserPromptSubmit-1'), session_id })
+    for (let i = 0; i < 5; i++) await post({ ...fixture('PreToolUse-5'), session_id, tool_use_id: `burst-${i}` })
+    await post({ ...fixture('Stop-1'), session_id })
+    expect(onWork).not.toHaveBeenCalled() // the window waits for the burst to end
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(1))
+    expect(Date.now() - sent).toBeGreaterThanOrEqual(350)
+    await pause(800)
+    expect(onWork).toHaveBeenCalledTimes(1) // one message for the whole burst
+
+    // Tool calls of a session that is already working change neither a status nor a count.
+    await post({ ...fixture('UserPromptSubmit-1'), session_id, prompt: 'again' })
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(2)) // working again: a status changed
+    await pause(500)
+    for (let i = 0; i < 5; i++) await post({ ...fixture('PreToolUse-5'), session_id, tool_use_id: `quiet-${i}` })
+    await pause(900)
+    expect(onWork).toHaveBeenCalledTimes(2)
+  })
+
+  it('tells main after a task is added, changed or deleted, and not after a read, a refresh or a close', async () => {
+    onWork.mockClear()
+    c.work({ kind: 'tasks.list' })
+    c.work({ kind: 'eod.get', day: '2026-11-13' })
+    c.work({ kind: 'eod.days' })
+    c.work({ kind: 'eod.refresh', day: '2026-11-13' })
+    c.work({ kind: 'eod.finalize', day: '2026-11-12' })
+    await pause(700)
+    expect(onWork).not.toHaveBeenCalled()
+
+    const added = c.work({ kind: 'tasks.add', input: { title: 'Signal me', project: null } })
+    const id = added.kind === 'task' && added.result.ok ? added.result.task.id : ''
+    c.work({ kind: 'tasks.update', id, patch: { title: 'Signal me, again' } })
+    c.work({ kind: 'eod.notes', day: '2026-11-13', notes: 'x' })
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(1))
+    await pause(700)
+    expect(onWork).toHaveBeenCalledTimes(1)
+    c.work({ kind: 'tasks.remove', id })
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(2))
+  })
+
+  it('opens and closes an item that waits on you: the report moved', async () => {
+    onWork.mockClear()
+    const session_id = 'ask-1'
+    await post({ ...fixture('UserPromptSubmit-1'), session_id })
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(1))
+    await pause(500)
+    onWork.mockClear()
+    await post({ ...fixture('Stop-1'), session_id, last_assistant_message: 'Which one do you want?' }) // a ready-for-review item opens
+    await vi.waitFor(() => expect(c.snapshot().attention.some((i) => i.sessionId === session_id)).toBe(true))
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(1))
+    const item = c.snapshot().attention.find((i) => i.sessionId === session_id)!
+    await pause(500)
+    onWork.mockClear()
+    c.dismiss(item.id) // the status stays, the item closes: only the item can be why main hears of it
+    await vi.waitFor(() => expect(c.snapshot().attention.some((i) => i.id === item.id)).toBe(false))
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalledTimes(1))
+  })
+
+  it('completes a task sent to a session when that session finishes, and answers every hook in < 20 ms p95 while it follows one', async () => {
+    onWork.mockClear()
+    const added = c.work({ kind: 'tasks.add', input: { title: 'Replay the capture', project: 'D:\\personal\\agentdeck\\spikes\\scratch' } })
+    const id = added.kind === 'task' && added.result.ok ? added.result.task.id : ''
+    c.work({ kind: 'tasks.update', id, patch: { status: 'doing', sessionName: 'scratch' } })
+    const took: number[] = []
+    for (const d of s1Deliveries()) {
+      const t = performance.now()
+      await post(JSON.parse(d.raw))
+      took.push(performance.now() - t)
+    }
+    took.sort((a, b) => a - b)
+    expect(took[Math.floor(took.length * 0.95)]).toBeLessThan(20) // the reply never waits for the task to be followed
+    await vi.waitFor(() => expect(tasks().find((t) => t.id === id)).toMatchObject({ status: 'done', sessionName: 'scratch' }))
+    expect(tasks().find((t) => t.id === id)?.doneAt).toBeGreaterThan(0)
+    await vi.waitFor(() => expect(onWork).toHaveBeenCalled())
+    expect(errors).not.toHaveBeenCalled()
+  })
 })

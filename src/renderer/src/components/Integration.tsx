@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { HooksPreview } from '@shared/bridge'
 import { useUi } from '@/store'
-import { Button, cn } from './ui'
+import { Button, Code, cn, modalFooter, modalLede, modalOverlay, modalPanel, modalTitle } from './ui'
 
 export type IntegrationMode = 'install' | 'uninstall'
 
@@ -30,7 +30,7 @@ function DiffLine({ line }: { line: string }) {
 /** ADR-0006: opt-in, and it changes the PermissionRequest entry, so it is chosen here, next to the diff it causes. */
 function RemoteApprovalsToggle({ on, waitSec, onChange }: { on: boolean; waitSec: number; onChange: (on: boolean) => void }) {
   return (
-    <label className="mt-4 flex cursor-pointer gap-3 rounded-tile bg-well p-3">
+    <label className="mt-4 flex cursor-pointer gap-3 rounded-tile bg-well p-3 transition-colors hover:bg-active">
       <input
         type="checkbox"
         checked={on}
@@ -102,10 +102,10 @@ export function IntegrationDialog({ mode, onClose }: { mode: IntegrationMode | n
   return (
     <Dialog.Root open={mode !== null} onOpenChange={(open) => !open && close()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/20" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[600px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-card border border-line bg-surface p-5 shadow-[0_16px_48px_rgb(0_0_0/0.16)]">
-          <Dialog.Title className="text-[15px] font-semibold [text-wrap:balance]">{copy?.title}</Dialog.Title>
-          <Dialog.Description className="mt-1 text-[13px] leading-5 text-muted [text-wrap:pretty]">{copy?.lead}</Dialog.Description>
+        <Dialog.Overlay className={modalOverlay} />
+        <Dialog.Content className={cn(modalPanel, 'flex max-h-[85vh] w-[600px] max-w-[calc(100vw-32px)] flex-col')}>
+          <Dialog.Title className={modalTitle}>{copy?.title}</Dialog.Title>
+          <Dialog.Description className={modalLede}>{copy?.lead}</Dialog.Description>
 
           {mode === 'install' && status && <RemoteApprovalsToggle on={remote} waitSec={status.remoteApprovals.waitSec} onChange={setChoice} />}
 
@@ -119,11 +119,11 @@ export function IntegrationDialog({ mode, onClose }: { mode: IntegrationMode | n
 
           {preview?.ok && (
             <>
-              <p className="mt-4 text-[13px]">
-                File: <code className="break-all rounded-[4px] bg-well px-1 py-px">{preview.path}</code>
+              <p className="mt-4 text-[13px] leading-5">
+                File: <Code className="break-all">{preview.path}</Code>
               </p>
               {preview.changed && (
-                <p className="mt-1 text-[12px] text-muted">
+                <p className="t-meta mt-1.5 text-muted">
                   A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. Below, the values already in your file and AgentDeck's token are hidden; only the keys and AgentDeck's address show.
                 </p>
               )}
@@ -135,7 +135,7 @@ export function IntegrationDialog({ mode, onClose }: { mode: IntegrationMode | n
                 </ul>
               )}
               {preview.changed ? (
-                <pre aria-label="Changes to settings.json" className="mt-3 min-h-0 flex-1 overflow-auto rounded-tile bg-well py-2 font-mono text-[12px] leading-5">
+                <pre role="region" tabIndex={0} aria-label="Changes to settings.json" className="mt-3 min-h-0 flex-1 overflow-auto rounded-tile bg-well py-2 font-mono text-[12px] leading-5">
                   {lines.map((l, i) => (
                     <DiffLine key={i} line={l} />
                   ))}
@@ -152,7 +152,7 @@ export function IntegrationDialog({ mode, onClose }: { mode: IntegrationMode | n
             </p>
           )}
 
-          <div className="mt-5 flex justify-end gap-2">
+          <div className={modalFooter}>
             <Dialog.Close asChild>
               <Button size="sm">{preview?.ok && preview.changed ? 'Cancel' : 'Close'}</Button>
             </Dialog.Close>

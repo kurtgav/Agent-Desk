@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest something AgentDeck should do.
+title: 'feat: '
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AgentDeck has three rules that a feature cannot break: **no network** (loopback only, no outbound requests, no telemetry), **no model calls of its own**, and **never auto-approve**. Ideas that fit inside them are very welcome. See [CONTRIBUTING.md](https://github.com/kurtgav/Agent-Desk/blob/main/CONTRIBUTING.md#the-invariants-do-not-break-these).
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today? A concrete moment is better than a general wish.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How you imagine it working, in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+      description: Workarounds, other tools, other ideas you considered.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which Claude Code surface does this involve?
+      options:
+        - Terminal (CLI)
+        - Claude Desktop
+        - VS Code extension
+        - Background sessions
+        - All of them / not specific
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Fit with the rules
+      options:
+        - label: This does not need a network connection, a model call, or an approval given without a click.
+          required: true
+        - label: I would be willing to help build or test it.

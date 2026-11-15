@@ -43,24 +43,28 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 | + New | **New task** | focuses the composer |
 | search icon | search | opens the Ctrl+K palette |
 | Home | Home | route |
+| (none) | **Console** | conversations with Claude Code started here (D-154): a rail of conversations (title, folder, state, cost, Resume a session), the open thread (messages, collapsed thinking, tool cards, turn footers), a composer with folder, model, effort and permission mode. Ctrl+N starts one, Esc stops the turn. Message text is in memory only |
+| (none) | **Tasks** | three lanes (D-127): your to-dos (`listTasks`, `addTask`, `updateTask`, `removeTask`) beside live sessions from the snapshot; quick-add row on top; actions appear on hover or focus without moving the layout (D-129) |
 | Projects | **Sessions** | the snapshot's sessions (live + ended this week, D-117), newest activity first; filters by status, surface, project. Row: avatar, name (opens the drawer), "activity · project · surface", age, status pill |
 | Templates | **Approvals** + badge | open P1 items, all expanded, + audit log (newest 300; what, session, project, wait, hash prefix, outcome; D-119); badge = open P1 count |
 | Artifacts | **Files** | latest change per path, one card per project, path filter; rows as Home's Recent files (D-120) |
 | Tasks + count | **Activity** | newest 300 events across sessions (D-118), filter; a row opens its session's drawer |
+| (none) | **Daily report** | day rail (`listEodDays`) beside the report (`getEod`); status line from `getSettings().eod`; toolbar Copy as Markdown (`copyText`), Write file now (`writeEod`), Open folder (`openEodFolder`); notes use `saveEodNotes` (D-131, D-132). Grouped under **Review** with Files and Activity (D-140) |
 | Recent (4 projects) | **Recent** | 5 most recently active project folders (cwd, normalized); click filters Sessions |
 | Teams (Product, Growth) | **Agents** | subagents used in the last 7 days (max 6, from `subagent.started.agentType`) + "All agents (N)" → page listing `~/.claude/agents` and the 5 recent projects' `.claude/agents` (name, where, model, description from frontmatter; read-only; "Start a task" picks it in the composer, D-121). 346 exist on this machine, so they are never listed inline |
-| Credits card (760 left of 2,000, Pro, Resets, Upgrade) | **Usage** card | today and this week tokens + **estimated** cost vs the budget you set; progress bar = week vs budget. Telemetry off → "Enable usage (OTel)" button (consent flow, ADR-0007). No plan badge, no Upgrade |
-| Maya Chen + email + gear | **Kurt** + settings gear | display name from Settings (default "Kurt", D-014). No email or account data. Gear opens Settings |
+| Credits card (760 left of 2,000, Pro, Resets, Upgrade) | **Usage** card | today and this week tokens + **estimated** cost vs the budget you set; progress bar = week vs budget. Telemetry off → the line "Usage appears when Claude Code telemetry is on." and no button (D-139). No plan badge, no Upgrade |
+| Maya Chen + email + gear | profile name + photo + settings gear | name and photo from Settings (default: the Windows account's first name, "Kurt" in demo, D-137); initials when there is no photo. No email or account data. The user block and the gear open Settings |
 
 ## Top bar
 | Reference | AgentDeck | Data / action |
 |---|---|---|
 | ⌂ Home breadcrumb + ☆ | breadcrumb | current page (Home › Sessions › project); Home goes back. The drawer is a dialog, so it is not a crumb. Star dropped (no data) |
-| Search in project ⌘K | **Search… Ctrl+K** | palette (D-122): pages, sessions, projects, changed files, actions (New task, Pause/Resume notifications, Remote approvals…). Diagnostics joins it with Settings in M5 |
+| Search in project ⌘K | **Search… Ctrl+K** | palette (D-122): pages, sessions, projects, changed files, actions (New task, Pause/Resume notifications, Remote approvals…, Diagnostics, Open daily report folder) |
 | blue app chip | **Live chip** | `Live` (hooks installed, no settings conflict, collector up), `Paused` (notifications paused; tooltip says until when), `Hooks missing` (red, also for a conflict, D-068; click → install dialog with the masked diff). Hidden in demo and while the collector is down (that banner says so). *M3:* no "event < 30 s" condition: an idle machine sends nothing, and that is still live (D-078) |
 | avatar stack | active agents | up to 3 avatars of Working/Needs-you sessions, "+N" overflow; click → Sessions |
 | Share | **New task** (pill) | focuses composer / opens dispatch dialog |
-| ⋯ | overflow | Pause notifications (1 h / until tomorrow 08:00 / resume, D-067), Remote approvals… (live only: the install dialog with the opt-in and its diff, D-104), Uninstall integration… (live only, D-069), Diagnostics, Settings (M5) |
+| (none) | **Theme** (split button) | one click flips light and dark; the chevron opens Light, Dark, Use system settings (D-146) |
+| ⋯ | overflow | Pause notifications (1 h / until tomorrow 08:00 / resume, D-067), Remote approvals… (live only: the install dialog with the opt-in and its diff, D-104), Uninstall integration… (live only, D-069), Diagnostics (opens Settings at Diagnostics), Settings |
 
 ## Greeting + composer
 | Reference | AgentDeck | Data / action |
@@ -99,7 +103,7 @@ Before the first snapshot, and whenever the collector exits until main has resta
 | Reference | AgentDeck | Data / action |
 |---|---|---|
 | Recent files + See all | **Recent files** | last 4 from `files`: name, "project · agent · 2 min ago", type icon from extension. Click → `code -g <path>` (cross-spawn; error toast if VS Code missing). See all → Files |
-| Your agents (6) tiles | **Your agents** | one tile per active or recent (24 h) session/agent: generated avatar, name, status pill. Click → session drawer |
+| Your agents (6) tiles | **Your agents** | one tile per active or recent (24 h) session/agent: mascot picture (D-147), name, status pill. Click → session drawer |
 
 ## Session drawer (opens from any row)
 - **Header:** name, surface, cwd, status pill, model (OTel or `--model`), started.

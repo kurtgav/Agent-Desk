@@ -39,6 +39,8 @@ export const Session = z.object({
   /** From TaskCreated/TaskCompleted; null when no plan exists. */
   plan: z.object({ done: z.number().int().nonnegative(), total: z.number().int().positive() }).nullable(),
   waitingSince: Ts.nullable(),
+  /** The session's own process, when the poll or a hook told us: "Answer in terminal" walks up from it to the window that hosts it. */
+  pid: z.number().int().positive().nullable().optional(),
   subagents: z.array(Subagent)
 })
 export type Session = z.infer<typeof Session>
@@ -78,7 +80,24 @@ export const Usage = z.object({
   weekTokens: z.number().int().nonnegative(),
   todayCostUsd: z.number().nonnegative(),
   weekCostUsd: z.number().nonnegative(),
-  weeklyBudgetUsd: z.number().positive()
+  weeklyBudgetUsd: z.number().positive(),
+  // Everything below is optional, so snapshots from before the log source (and the demo's) still parse. It is set only when the
+  // figures come from Claude Code's local logs (`usage.readLogs`, ADR-0009 amendment). Absent `source` means Claude Code's OTel export.
+  source: z.enum(['otel', 'logs']).optional(),
+  /** Some request in the week ran on a model with no known price, so the cost is a floor. */
+  costPartial: z.boolean().optional(),
+  /** The estimated 5-hour window open now (ccusage's rule): a guess at Claude's rolling window, never the plan's real limit. */
+  block: z.object({ startedAt: Ts, endsAt: Ts, tokens: z.number().int().nonnegative() }).nullable().optional(),
+  /** This week's busiest models by tokens, at most three. */
+  topModels: z.array(z.object({ model: z.string(), tokens: z.number().int().nonnegative() })).max(3).optional(),
+  /** Reading the logs: files known, when a figure last changed, and the first pass's progress while it runs. */
+  logs: z
+    .object({
+      files: z.number().int().nonnegative(),
+      lastAt: Ts.nullable(),
+      scan: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).nullable()
+    })
+    .optional()
 })
 export type Usage = z.infer<typeof Usage>
 

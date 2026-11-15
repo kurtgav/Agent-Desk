@@ -1,36 +1,58 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Activity, Files, FileText, FolderClosed, House, LayoutList, Play, Search, ShieldCheck, Users, type LucideIcon } from 'lucide-react'
+import { Activity, Files, FileText, FolderClosed, FolderOpen, LayoutDashboard, LayoutList, ListChecks, MessageSquarePlus, Play, Search, Settings, ShieldCheck, Stethoscope, Users, type LucideIcon } from 'lucide-react'
 import { useUi, type Nav, type Page } from '@/store'
 import { openChangedFile } from '@/lib/act'
-import { projectName, recentProjects, recentSessions } from '@/lib/selectors'
+import { projectName, recentProjects } from '@/lib/selectors'
 import { latestPerPath } from './RecentFiles'
+import { useRoleCommands } from './roles/palette'
 import { PAGE_TITLE } from './pages/Page'
-import { focusComposer } from './Sidebar'
-import { cn } from './ui'
+import { openReportFolder, openSettings } from './settings/actions'
+import { newSession, startSessionAs } from './shell/actions'
+import { currentEntries } from './shell/useEntries'
+import { EmptyState, Kbd, cn, modalOverlay } from './ui'
 
 export interface Command {
   id: string
-  group: 'Go to' | 'Actions' | 'Sessions' | 'Projects' | 'Files'
+  group: 'Go to' | 'Actions' | 'Sessions' | 'Projects' | 'Files' | 'Roles'
   label: string
   meta?: string
   icon: LucideIcon
+  /** Drawn in place of the icon (a role's face). */
+  emoji?: string
   run(): void
 }
 
-const PAGE_ICON: Record<Page, LucideIcon> = { home: House, sessions: LayoutList, approvals: ShieldCheck, files: Files, activity: Activity, agents: Users }
+const PAGE_ICON: Record<Page, LucideIcon> = {
+  new: MessageSquarePlus,
+  session: LayoutList,
+  overview: LayoutDashboard,
+  tasks: ListChecks,
+  sessions: LayoutList,
+  approvals: ShieldCheck,
+  files: Files,
+  activity: Activity,
+  report: FileText,
+  roles: Users,
+  settings: Settings
+}
 /** Per group once something is typed; with nothing typed, pages, actions and the five newest sessions. */
 const PER_GROUP = 8
 
-/** Everything the palette can do right now (UI_MAP § Top bar: sessions, projects, files, actions). */
+/** Every page but the open session itself, and the new session screen, which the New session action is. */
+const GO_TO = (Object.keys(PAGE_TITLE) as Page[]).filter((p) => p !== 'session' && p !== 'new')
+
+/** Everything the palette can do right now (UI_MAP § Top bar: pages, New session, sessions started here or watched, projects, files). Agents join as you type. */
 export function commands(): Command[] {
   const ui = useUi.getState()
   const { snapshot, status } = ui
   const go = (nav: Nav) => () => ui.go(nav)
   const paused = status?.pausedUntil != null && Date.now() < status.pausedUntil
-  const pages = (Object.keys(PAGE_TITLE) as Page[]).map((p): Command => ({ id: `page:${p}`, group: 'Go to', label: PAGE_TITLE[p], icon: PAGE_ICON[p], run: go({ page: p }) }))
+  const pages = GO_TO.map((p): Command => ({ id: `page:${p}`, group: 'Go to', label: PAGE_TITLE[p], icon: PAGE_ICON[p], run: go({ page: p }) }))
   const actions: Command[] = [
-    { id: 'new-task', group: 'Actions', label: 'New task', icon: Play, run: focusComposer },
+    { id: 'new-session', group: 'Actions', label: 'New session', meta: 'Ctrl N', icon: MessageSquarePlus, run: newSession },
+    { id: 'diagnostics', group: 'Actions', label: 'Diagnostics', icon: Stethoscope, run: () => openSettings('diagnostics') },
+    { id: 'report-folder', group: 'Actions', label: 'Open daily report folder', icon: FolderOpen, run: () => void openReportFolder() },
     ...(status
       ? [
           paused
@@ -40,8 +62,9 @@ export function commands(): Command[] {
         ]
       : [])
   ]
-  const sessions = recentSessions(snapshot, snapshot.sessions.length).map((s): Command => ({
-    id: `session:${s.id}`, group: 'Sessions', label: s.name, meta: projectName(s.cwd), icon: LayoutList, run: () => ui.openDrawer(s.id)
+  // A session you renamed is found by either name: the one you gave it leads, Claude Code's is kept in the meta.
+  const sessions = currentEntries().map((e): Command => ({
+    id: `session:${e.key}`, group: 'Sessions', label: e.name, meta: e.name === e.session.name ? e.project : `${e.session.name} · ${e.project}`, icon: LayoutList, run: () => ui.openSession(e.key)
   }))
   const projects = recentProjects(snapshot, snapshot.sessions.length).map((p): Command => ({
     id: `project:${p.cwd}`, group: 'Projects', label: p.name, meta: p.cwd, icon: FolderClosed, run: go({ page: 'sessions', project: p.cwd })
@@ -84,7 +107,7 @@ export function Palette() {
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/20" />
+        <Dialog.Overlay className={cn(modalOverlay, 'z-[60]')} />
         <Dialog.Content
           aria-describedby={undefined}
           onOpenAutoFocus={() => {
@@ -98,7 +121,7 @@ export function Palette() {
               if (o?.isConnected && (document.activeElement === null || document.activeElement === document.body)) o.focus()
             })
           }}
-          className="fixed left-1/2 top-[12vh] z-[70] flex max-h-[70vh] w-[560px] -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-[0_16px_48px_rgb(0_0_0/0.16)]"
+          className="anim-rise fixed left-1/2 top-[12vh] z-[70] flex max-h-[70vh] w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-overlay shadow-modal outline-none"
         >
           <Dialog.Title className="sr-only">Search AgentDeck</Dialog.Title>
           {/* Its own component, so the query and highlight reset whenever the palette closes, however it closes. */}
@@ -114,7 +137,9 @@ function Results({ close }: { close(): void }) {
   const [active, setActive] = useState(0)
   const list = useRef<HTMLDivElement>(null)
   // Read when it opens and as you type; the palette is short-lived, so it needn't follow every snapshot.
-  const shown = search(commands(), q)
+  // An agent in the results starts a new session as that agent, as a click in the sidebar does.
+  const roleHits = useRoleCommands(q).map((c): Command => ({ ...c, run: () => startSessionAs(c.id.replace(/^role:/, '')) }))
+  const shown = [...search(commands(), q), ...roleHits]
   const index = Math.min(active, Math.max(0, shown.length - 1))
 
   useEffect(() => {
@@ -152,19 +177,19 @@ function Results({ close }: { close(): void }) {
           aria-expanded={shown.length > 0}
           aria-controls={shown.length ? 'palette-list' : undefined}
           aria-activedescendant={shown[index] ? `palette-${index}` : undefined}
-          aria-label="Search sessions, projects, files and actions"
-          placeholder="Search sessions, projects, files and actions"
+          aria-label="Search sessions, agents, pages and files"
+          placeholder="Search sessions, agents, pages and files"
           className="h-12 min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted"
         />
       </div>
       {shown.length === 0 ? (
-        <p className="px-4 py-6 text-center text-[13px] text-muted">Nothing matches.</p>
+        <EmptyState center>Nothing matches.</EmptyState>
       ) : (
-        <div ref={list} id="palette-list" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        <div ref={list} id="palette-list" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-2">
           {groups(shown).map(([group, items]) => (
             <div key={group} role="group" aria-label={group}>
               <div aria-hidden className="px-2.5 pb-1 pt-2 text-[12px] font-medium text-muted">
-                {group}
+                {group === 'Roles' ? 'Agents' : group}
               </div>
               {items.map(([c, i]) => (
                 <div
@@ -175,9 +200,15 @@ function Results({ close }: { close(): void }) {
                   aria-selected={i === index}
                   onMouseMove={() => i !== index && setActive(i)}
                   onClick={() => run(c)}
-                  className={cn('flex h-9 cursor-default items-center gap-2.5 rounded-md px-2.5 text-[13px]', i === index && 'bg-ground')}
+                  className={cn('flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-[13px]', i === index && 'bg-well')}
                 >
-                  <c.icon size={15} strokeWidth={1.75} className="flex-none text-muted" aria-hidden />
+                  {c.emoji ? (
+                    <span className="flex size-[15px] flex-none items-center justify-center text-[14px] leading-none" aria-hidden>
+                      {c.emoji}
+                    </span>
+                  ) : (
+                    <c.icon size={15} strokeWidth={1.75} className={cn('flex-none', i === index ? 'text-ink' : 'text-muted')} aria-hidden />
+                  )}
                   <span className="truncate">{c.label}</span>
                   {c.meta && <span className="min-w-0 flex-1 truncate text-right text-[12px] text-muted">{c.meta}</span>}
                 </div>
@@ -186,37 +217,21 @@ function Results({ close }: { close(): void }) {
           ))}
         </div>
       )}
+      <div aria-hidden className="flex flex-none items-center gap-4 border-t border-line bg-ground px-4 py-2 text-[12px] text-muted">
+        <span className="flex items-center gap-1.5">
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd>
+          move
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Kbd>↵</Kbd>
+          open
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Kbd>Esc</Kbd>
+          close
+        </span>
+      </div>
     </>
   )
-}
-
-const CHORD_MS = 1_000
-const CHORD: Record<string, Page> = { h: 'home', s: 'sessions', a: 'approvals' }
-
-/** Ctrl+K opens the palette anywhere; `g h` / `g s` / `g a` go to Home, Sessions or Approvals when no field or dialog has focus. */
-export function useShortcuts(): void {
-  useEffect(() => {
-    let g = 0
-    const onKey = (e: globalThis.KeyboardEvent): void => {
-      const ui = useUi.getState()
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        ui.setPalette(!ui.palette)
-        return
-      }
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
-      const t = e.target as HTMLElement | null
-      if (t?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]')) return
-      const key = e.key.toLowerCase()
-      if (g && Date.now() - g < CHORD_MS && CHORD[key]) {
-        e.preventDefault()
-        g = 0
-        ui.go({ page: CHORD[key] })
-        return
-      }
-      g = key === 'g' ? Date.now() : 0
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 }

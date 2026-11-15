@@ -5,7 +5,7 @@ import globals from 'globals'
 import { defineConfig } from 'eslint/config'
 
 export default defineConfig(
-  { ignores: ['out/**', 'dist/**', 'spikes/**', '.taste-skill/**', 'test-results/**', 'playwright-report/**'] },
+  { ignores: ['out/**', 'dist/**', 'release/**', 'spikes/**', '.taste-skill/**', 'test-results/**', 'playwright-report/**'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

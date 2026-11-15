@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Surface } from '@shared/snapshot'
 import { ulid, type AgentEvent } from './events'
-import { run, system32, type RunResult } from './cli'
+import { isDesktopPath, run, system32, type RunResult } from './cli'
 import { cap, maskSecrets } from './redact'
 
 /** D-005 cadence. The 1 s "P1 open" rate arrives with the attention engine (M3). */
@@ -60,12 +60,12 @@ export function parseRows(stdout: string): Row[] | null {
   })
 }
 
-/** D-021, from the exe path of the session's pid. */
+/** D-021, from the exe path of the session's pid (either separator: the same rules hold on macOS). */
 export function surfaceFromExe(exe: string | null, kind: string | undefined): Surface {
   if (kind === 'background') return 'background'
   if (!exe) return 'cli'
-  if (/\\Claude-Data\\|\\WindowsApps\\Claude_/i.test(exe)) return 'desktop'
-  if (/\\\.vscode[^\\]*\\extensions\\|\\\.cursor\\/i.test(exe)) return 'vscode'
+  if (isDesktopPath(exe)) return 'desktop'
+  if (/[\\/]\.vscode[^\\/]*[\\/]extensions[\\/]|[\\/]\.cursor[\\/]/i.test(exe)) return 'vscode'
   return 'cli'
 }
 
@@ -94,13 +94,21 @@ export function diffRows(prev: ReadonlyMap<string, Row>, rows: readonly Row[], s
 }
 
 /**
- * Exe paths for pids, one PowerShell call per batch of new pids (D-045); null when the call itself failed.
- * Pids are integers, so nothing is interpolated.
+ * Exe paths for pids, one call per batch of new pids (D-045); null when the call itself failed. Pids are integers, so nothing
+ * is interpolated. Windows: PowerShell Get-Process, `Id<TAB>Path` lines. macOS: `ps -o pid=,comm=`, `pid path` lines; comm is
+ * the path the process was started with, so a CLI started as plain `claude` reads as the CLI, while Desktop and the VS Code
+ * extension start theirs by full path. An exit of 1 from ps only means a pid was not found; what it listed still counts.
  */
-export async function exePaths(pids: readonly number[], exec: typeof run = run): Promise<Map<number, string | null> | null> {
+export async function exePaths(pids: readonly number[], exec: typeof run = run, platform: NodeJS.Platform = process.platform): Promise<Map<number, string | null> | null> {
   const out = new Map<number, string | null>(pids.map((p) => [p, null]))
   const safe = pids.filter((p) => Number.isSafeInteger(p) && p > 0)
   if (!safe.length) return out
+  if (platform !== 'win32') {
+    const { code, stdout } = await exec('/bin/ps', ['-o', 'pid=,comm=', '-p', safe.join(',')], PS_TIMEOUT_MS)
+    if (code !== 0 && code !== 1) return null
+    for (const m of stdout.matchAll(/^\s*(\d+)\s+(.+)$/gm)) out.set(Number(m[1]), m[2]!.trim())
+    return out
+  }
   const script = `Get-Process -Id ${safe.join(',')} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id)\`t$($_.Path)" }`
   const { code, stdout } = await exec(system32('WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], PS_TIMEOUT_MS)
   if (code !== 0) return null

@@ -1,9 +1,10 @@
 // ADR-0013 desktop signals from the attention items: toasts, taskbar overlay badge, tray dot, flashFrame.
 import { join } from 'node:path'
-import { Notification, nativeImage, type BrowserWindow, type Tray } from 'electron'
+import { Notification, app, nativeImage, type BrowserWindow, type Tray } from 'electron'
 import type { HooksState } from '@shared/bridge'
 import type { AttentionItem, Snapshot } from '@shared/snapshot'
-import { badgeCount, badgeIcon, isPaused, newItems, shouldToast, toastText, trayIcon, trayTooltip, type NotifyPrefs } from './notify'
+import { badgeCount, badgeIcon, dockBadge, isPaused, newItems, shouldToast, toastText, trayIcon, trayImage, trayTooltip, type NotifyPrefs } from './notify'
+import { createToast } from './toasts'
 
 export interface SignalDeps {
   resources: string
@@ -59,7 +60,7 @@ export class Signals {
     if (item.priority === 1 && alive(w) && !focused) w.flashFrame(true)
     const viewing = focused && w.isVisible() && !w.isMinimized()
     if (!Notification.isSupported() || !shouldToast(item, this.d.prefs(), new Date(), viewing)) return
-    const n = new Notification({ ...toastText(item, s.sessions.find((x) => x.id === item.sessionId)), icon: join(this.d.resources, 'icon.png') })
+    const n = createToast(toastText(item, s.sessions.find((x) => x.id === item.sessionId)))
     n.on('click', () => this.d.open(item.id))
     this.toasts.set(item.id, n)
     n.show()
@@ -75,10 +76,12 @@ export class Signals {
     if (key === this.shown) return
     this.shown = key
     const image = (name: string): Electron.NativeImage => nativeImage.createFromPath(join(this.d.resources, `${name}.png`))
-    if (alive(w)) w.setOverlayIcon(badge ? image(badge) : null, badge ? `${count} need${count === 1 ? 's' : ''} you` : '')
+    // macOS has no taskbar overlay: the count goes on the Dock icon, which stays while the window is hidden.
+    if (process.platform === 'darwin') app.dock?.setBadge(dockBadge(count))
+    else if (alive(w)) w.setOverlayIcon(badge ? image(badge) : null, badge ? `${count} need${count === 1 ? 's' : ''} you` : '')
     const t = this.d.tray()
     if (t) {
-      t.setImage(image(tray))
+      t.setImage(image(trayImage(tray)))
       t.setToolTip(trayTooltip(tray, count, this.d.title()))
     }
   }

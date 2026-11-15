@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from '../demo/snapshot'
-import { avatarFor, HUES, SHAPES } from './avatar'
+import { agentArt, avatarFor, HUES, MASCOTS, SHAPES } from './avatar'
 import { ago, ageWords, clock, dateLabel, duration, timeOfDay, tokens, usd, weekDelta } from './format'
 import {
   byPriority, filesChanged, needsOkCount, projectName, recentProjects, recentSessions, running,
@@ -48,7 +48,7 @@ describe('format', () => {
   })
 })
 
-describe('avatar', () => {
+describe('avatar fallback shape', () => {
   it('is deterministic and case-insensitive', () => {
     expect(avatarFor('Explore')).toEqual(avatarFor('explore'))
     expect(SHAPES).toContain(avatarFor('stripe-webhooks').shape)
@@ -57,6 +57,46 @@ describe('avatar', () => {
   it('spreads seeds across shapes', () => {
     const shapes = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'].map((s) => avatarFor(s).shape))
     expect(shapes.size).toBeGreaterThan(3)
+  })
+})
+
+describe('agent mascots', () => {
+  const projects = ['erp', 'fennel', 'agentdeck', 'kurtgavin', 'billing', 'web-app', 'api', 'docs', 'infra', 'mobile', 'stripe-webhooks', 'optimize my repo']
+  const realistic = projects.flatMap((p) => ['c5', '46', '57', 'a1', '9f', '02', 'e7', 'b3', '7d', '18', '3c', 'f0', 'd4', '61', '8a', '25', 'x9'].map((x) => `${p}-${x}`)).slice(0, 200)
+
+  it('ships a pool of distinct, non-empty images, sorted by file name', () => {
+    expect(MASCOTS.length).toBeGreaterThanOrEqual(30)
+    expect(new Set(MASCOTS).size).toBe(MASCOTS.length)
+    expect(MASCOTS.every((url) => /\.webp(\?|$)/.test(url))).toBe(true)
+    expect(MASCOTS).toEqual([...MASCOTS].sort())
+  })
+  it('gives one name one mascot, whatever the case', () => {
+    expect(agentArt('Explore')).toBe(agentArt('explore'))
+    expect(agentArt('erp-fc')).toBe(agentArt('ERP-FC'))
+    expect(agentArt('erp-fc')).toBe(agentArt('erp-fc'))
+  })
+  it('never returns nothing while there are mascots', () => {
+    for (let i = 0; i < 2000; i++) expect(MASCOTS).toContain(agentArt(`agent-${i}`))
+    expect(MASCOTS).toContain(agentArt(''))
+  })
+  it('can reach every mascot', () => {
+    const seen = new Set(Array.from({ length: 5000 }, (_, i) => agentArt(`session-${i}`)))
+    expect(seen.size).toBe(MASCOTS.length)
+  })
+  it('spreads 200 realistic names over at least 80% of the pool', () => {
+    expect(realistic).toHaveLength(200)
+    const seen = new Set(realistic.map((name) => agentArt(name)))
+    expect(seen.size / MASCOTS.length).toBeGreaterThanOrEqual(0.8)
+  })
+  it('shows the demo sessions and agent types with different mascots', () => {
+    const { sessions, recentAgentTypes } = demoSnapshot(NOW)
+    const names = [...sessions.map((x) => x.name), ...recentAgentTypes]
+    expect(new Set(names.map((name) => agentArt(name))).size).toBe(names.length)
+  })
+  it('falls back to the generated shape when the pool is empty', () => {
+    expect(agentArt('Explore', [])).toBeNull()
+    expect(agentArt('Explore', ['/only.webp'])).toBe('/only.webp')
+    expect(SHAPES).toContain(avatarFor('Explore').shape)
   })
 })
 

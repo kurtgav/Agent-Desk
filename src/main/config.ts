@@ -38,7 +38,7 @@ export function readConfig(file: string): AppConfig {
 /** ADR-0006: off, 60 s. Clamped so the hook timeout (the wait plus 10 s) stays between 25 s and 310 s. */
 export const APPROVAL_WAIT_SEC = { default: 60, min: 15, max: 300 } as const
 
-/** `remoteApprovals` from config.json; the wait is only editable there until Settings (M5). */
+/** `remoteApprovals` from config.json; the on/off lives in the install dialog (D-104) and the wait in config.json. */
 export function remoteApprovals(c: AppConfig): RemoteApprovals {
   const r = typeof c.remoteApprovals === 'object' && c.remoteApprovals !== null ? (c.remoteApprovals as Record<string, unknown>) : {}
   const wait = typeof r.waitSec === 'number' && Number.isFinite(r.waitSec) ? Math.round(r.waitSec) : APPROVAL_WAIT_SEC.default

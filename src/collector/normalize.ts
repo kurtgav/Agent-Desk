@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { z } from 'zod'
 import { pathKey } from '@shared/paths'
 import { ulid, type AgentEvent, type EventKind } from './events'
@@ -45,7 +45,8 @@ export function displayPath(p: string, cwd: string | null): string {
   const abs = resolve(p)
   const base = resolve(cwd)
   if (!pathKey(abs).startsWith(`${pathKey(base)}\\`)) return p
-  return relative(base, abs)
+  // The rest after the base, not path.relative: on macOS that one is case-sensitive, and would say ../Proj/… here.
+  return abs.slice(base.replace(/[\\/]+$/, '').length + 1)
 }
 
 /** docs/EVENT_SCHEMA.md § Activity text. `input` is already redacted. */

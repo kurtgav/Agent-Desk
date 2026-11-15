@@ -63,15 +63,32 @@ describe('diffRows', () => {
 describe('exePaths', () => {
   it('asks PowerShell (by absolute path) for integer pids only and parses Id<TAB>Path lines', async () => {
     const exec = vi.fn().mockResolvedValue({ code: 0, stdout: '7\tC:\\a\\claude.exe\r\n8\t\r\n' })
-    const paths = await exePaths([7, 8, -1, 1.5], exec)
-    expect(exec.mock.calls[0]![0]).toMatch(/^[A-Z]:\\.+\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/i)
+    const paths = await exePaths([7, 8, -1, 1.5], exec, 'win32')
+    expect(exec.mock.calls[0]![0]).toMatch(/^[A-Z]:\\.+[\\/]System32[\\/]WindowsPowerShell[\\/]v1\.0[\\/]powershell\.exe$/i)
     const script = exec.mock.calls[0]![1].at(-1) as string
     expect(script).toContain('Get-Process -Id 7,8 ')
     expect([...paths!]).toEqual([[7, 'C:\\a\\claude.exe'], [8, null], [-1, null], [1.5, null]])
   })
 
   it('reports a failed call as null, so nothing gets cached as CLI', async () => {
-    expect(await exePaths([7], vi.fn().mockResolvedValue({ code: null, stdout: '' }))).toBeNull()
+    expect(await exePaths([7], vi.fn().mockResolvedValue({ code: null, stdout: '' }), 'win32')).toBeNull()
+    expect(await exePaths([7], vi.fn().mockResolvedValue({ code: null, stdout: '' }), 'darwin')).toBeNull()
+  })
+
+  it('asks ps on macOS for pid and executable, and keeps a path with spaces whole', async () => {
+    const vscode = '/Users/k/.vscode/extensions/anthropic.claude-code-2.1.0-darwin-arm64/resources/native-binary/claude'
+    const desktop = '/Applications/Claude.app/Contents/Resources/app/claude code'
+    const exec = vi.fn().mockResolvedValue({ code: 0, stdout: `    7 ${vscode}\n   12 ${desktop}\n` })
+    const paths = await exePaths([7, 12, 30, -1], exec, 'darwin')
+    expect(exec.mock.calls[0]!.slice(0, 2)).toEqual(['/bin/ps', ['-o', 'pid=,comm=', '-p', '7,12,30']])
+    expect([...paths!]).toEqual([[7, vscode], [12, desktop], [30, null], [-1, null]])
+    expect(surfaceFromExe(paths!.get(7)!, 'interactive')).toBe('vscode')
+    expect(surfaceFromExe(paths!.get(12)!, 'interactive')).toBe('desktop')
+  })
+
+  it('takes ps exiting 1 (a pid already gone) as an answer, not a failure', async () => {
+    const paths = await exePaths([7, 8], vi.fn().mockResolvedValue({ code: 1, stdout: '7 /usr/local/bin/claude\n' }), 'darwin')
+    expect([...paths!]).toEqual([[7, '/usr/local/bin/claude'], [8, null]])
   })
 })
 

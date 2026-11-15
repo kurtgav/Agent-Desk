@@ -1,7 +1,9 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, screen } from 'electron'
 import { APP_ENTRY, isAppUrl } from './app-url'
-import { readJson, writeJson } from './config'
+import { parseThemeChoice } from '@shared/theme'
+import { readConfig, readJson, writeJson } from './config'
+import { followTheme, resolvedTheme, startTheme } from './theme'
 import { buildWindowOptions } from './window-options'
 import { resolveWindowState } from './window-state'
 
@@ -32,9 +34,11 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     screen.getAllDisplays().map((d) => d.workArea),
     screen.getPrimaryDisplay().workArea
   )
+  startTheme(parseThemeChoice(readConfig(join(app.getPath('userData'), 'config.json')).theme) ?? 'system')
   const win = new BrowserWindow(
-    buildWindowOptions({ bounds: state.bounds, preload: join(__dirname, '../preload/index.js'), icon: opts.icon, title: opts.title })
+    buildWindowOptions({ bounds: state.bounds, preload: join(__dirname, '../preload/index.js'), icon: opts.icon, title: opts.title, theme: resolvedTheme() })
   )
+  followTheme(win)
 
   lockDown(win)
   persistState(win, stateFile)

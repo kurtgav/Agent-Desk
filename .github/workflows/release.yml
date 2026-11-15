@@ -1,0 +1,124 @@
+name: release
+
+# Pushing a tag like v0.1.0 builds the Windows installer and opens a DRAFT GitHub Release with the installer
+# and SHA256SUMS.txt; the macos job then adds the dmg and zip files and their lines in SHA256SUMS.txt.
+# Nothing is public until a maintainer opens the draft and clicks Publish.
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the release and upload its assets; nothing else needs a token
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Tag must match package.json and have a changelog entry
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$pkg" ]; then
+            echo "::error::Tag $TAG does not match package.json version $pkg"
+            exit 1
+          fi
+          # Release notes are the matching section of CHANGELOG.md.
+          awk -v v="$version" 'index($0, "## [" v "]") == 1 { p = 1; next } /^## / || /^\[[^]]*\]: / { p = 0 } p' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run dist
+
+      - name: Checksums
+        shell: bash
+        working-directory: release
+        run: |
+          ls -l
+          sha256sum "AgentDeck-Setup-${TAG#v}.exe" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft the GitHub Release
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          {
+            echo
+            echo "## Verify the download"
+            echo
+            echo "The installer is unsigned, so Windows SmartScreen will warn. Compare its SHA-256 with \`SHA256SUMS.txt\`:"
+            echo
+            echo '```powershell'
+            echo "(Get-FileHash .\\AgentDeck-Setup-$version.exe -Algorithm SHA256).Hash"
+            echo '```'
+            echo
+            echo "The macOS dmg is not notarized, so the first open needs Control-click > Open (or System Settings >"
+            echo "Privacy & Security > Open Anyway). Pick arm64 for Apple silicon, x64 for Intel:"
+            echo
+            echo '```sh'
+            echo "shasum -a 256 AgentDeck-$version-arm64.dmg"
+            echo '```'
+          } >> release-notes.md
+          flags=(--draft --verify-tag --title "AgentDeck $version" --notes-file release-notes.md)
+          case "$version" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "release/AgentDeck-Setup-$version.exe" release/SHA256SUMS.txt "${flags[@]}"
+
+  # Runs after the draft exists, so it only adds to it: the dmg and zip per arch, and their checksums appended to
+  # the SHA256SUMS.txt the Windows job wrote.
+  macos:
+    needs: release
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # upload to the draft release
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:mac
+
+      - name: Add to the draft release
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          files=()
+          for arch in arm64 x64; do files+=("AgentDeck-$version-$arch.dmg" "AgentDeck-$version-$arch.zip"); done
+          cd release
+          ls -l
+          gh release download "$TAG" --pattern SHA256SUMS.txt --clobber
+          shasum -a 256 "${files[@]}" >> SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" "${files[@]}" SHA256SUMS.txt --clobber

@@ -3,11 +3,11 @@ param(
   [string]$Prompt = 'Use the shell to run exactly: mkdir spikes\scratch\perm-bg . Then reply OK.',
   [int]$Seconds = 40,
   [string]$Label = 's7',
-  [string]$Cwd = 'D:\personal\agentdeck',
-  [string]$SettingsFile = 'D:\personal\agentdeck\spikes\bg-hooks.json'
+  [string]$Cwd = (Split-Path -Parent $PSScriptRoot),
+  [string]$SettingsFile = (Join-Path $PSScriptRoot 'bg-hooks.json')
 )
 Get-ChildItem Env: | Where-Object Name -like 'CLAUDE*' | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
-$out = 'D:\personal\agentdeck\spikes\out'
+$out = Join-Path $PSScriptRoot 'out'
 New-Item -ItemType Directory -Force $out | Out-Null
 Set-Location -LiteralPath $Cwd
 $now = { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }

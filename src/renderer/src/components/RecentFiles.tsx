@@ -4,7 +4,8 @@ import { useUi } from '@/store'
 import { openChangedFile } from '@/lib/act'
 import { ago } from '@/lib/format'
 import { projectName, sessionIndex } from '@/lib/selectors'
-import { Button, Card, CardHeader, Hint } from './ui'
+import { useDisplayName } from './session-menu/hooks'
+import { Card, CardAction, CardHeader, EmptyState, Hint } from './ui'
 
 const MAX_ROWS = 4
 const CODE = /\.(tsx?|jsx?|mjs|cjs|css|json|py|go|rs|cs|java|sql|ya?ml|toml|sh|ps1)$/i
@@ -12,10 +13,11 @@ const CODE = /\.(tsx?|jsx?|mjs|cjs|css|json|py|go|rs|cs|java|sql|ya?ml|toml|sh|p
 /** One changed file: a click opens it in VS Code (`code -g`). Also the Files page's row. */
 export function FileRow({ file, session, now }: { file: ChangedFile; session: Session | undefined; now: number }) {
   const Icon = CODE.test(file.path) ? FileCode : FileText
+  const name = useDisplayName(session)
   return (
     <li className="border-t border-rule">
       <Hint label={`Open in VS Code: ${file.path}`}>
-        <button type="button" onClick={() => void openChangedFile(file.path)} className="flex h-[57px] w-full items-center gap-3 px-4 text-left transition-[background-color] duration-150 hover:bg-ground">
+        <button type="button" onClick={() => void openChangedFile(file.path)} className="flex h-[57px] w-full items-center gap-3 px-4 text-left transition-colors hover:bg-hover">
           <span className="grid size-8 flex-none place-items-center rounded-lg bg-well" aria-hidden>
             <Icon size={15} strokeWidth={1.75} className="text-muted" />
           </span>
@@ -24,7 +26,7 @@ export function FileRow({ file, session, now }: { file: ChangedFile; session: Se
               {projectName(file.path)}
             </span>
             <span className="block truncate text-[12px] leading-4 text-muted">
-              {session ? `${projectName(session.cwd)} · ${session.name}` : file.tool} · {ago(now - file.changedAt)}
+              {session ? `${projectName(session.cwd)} · ${name}` : file.tool} · {ago(now - file.changedAt)}
             </span>
           </span>
           <ChevronRight size={16} strokeWidth={1.75} className="flex-none text-muted" aria-hidden />
@@ -60,9 +62,7 @@ export function RecentFiles() {
         id="recent-files"
         title="Recent files"
         action={
-          <Button variant="ghost" size="sm" onClick={() => go({ page: 'files' })}>
-            See all
-          </Button>
+          <CardAction onClick={() => go({ page: 'files' })}>See all</CardAction>
         }
       />
       {files.length ? (
@@ -72,7 +72,7 @@ export function RecentFiles() {
           ))}
         </ul>
       ) : (
-        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">No files changed this week.</p>
+        <EmptyState icon={FileText}>No files changed this week.</EmptyState>
       )}
     </Card>
   )
