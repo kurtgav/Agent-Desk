@@ -1,4 +1,4 @@
-import { NO_OPTIONS, type CommandInfo, type ConsoleBody, type ConsoleCapabilities, type ConsoleEvent, type ConsoleSummary, type McpListResult } from '@shared/console'
+import { NO_OPTIONS, type CommandInfo, type ConsoleBody, type ConsoleCapabilities, type ConsoleEvent, type ConsoleSummary, type McpListResult, type ModelInfo } from '@shared/console'
 
 /**
  * Demo data for the Console (ADR-0011): two believable conversations and a scripted reply. Nothing here runs `claude`; it is only
@@ -71,6 +71,27 @@ export const demoCapabilities = (model = 'claude-sonnet-5-5'): ConsoleCapabiliti
   tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'mcp__claude_ai_Gmail__list_labels', 'mcp__claude_ai_Gmail__search_threads', 'mcp__claude_ai_Google_Drive__list_recent_files', 'mcp__github__list_pull_requests'],
   terminalOnly: ['doctor', 'color', 'focus']
 })
+
+/** The model list in demo mode: what Claude Code 2.1.325 listed for a Max account. */
+export const demoModels = (): ModelInfo[] =>
+  (
+    [
+      ['default', 'Default (recommended)', 'Opus 5.5 · Best for everyday, complex tasks'],
+      ['opus', 'Opus 5.5', 'For complex work and everyday tasks'],
+      ['fable', 'Fable 5.2', 'For your toughest challenges'],
+      ['sonnet', 'Sonnet 5.5', 'Most efficient for simpler tasks'],
+      ['haiku', 'Haiku 5.5', 'Fastest for quick answers'],
+      ['claude-fable-5-1', 'Fable 5.1', 'Most capable for your hardest and longest-running tasks'],
+      ['claude-haiku-4-5-20251001', 'Haiku 4.5', 'Fastest for quick answers'],
+      ['claude-sonnet-5', 'Sonnet 5', 'Efficient for routine tasks'],
+      ['claude-opus-5', 'Opus 5', 'Best for everyday, complex tasks'],
+      ['claude-fable-5', 'Fable 5', 'Most capable for your hardest and longest-running tasks'],
+      ['claude-opus-4-8', 'Opus 4.8', 'Best for everyday, complex tasks'],
+      ['claude-opus-4-7', 'Opus 4.7', 'Best for everyday, complex tasks'],
+      ['claude-opus-4-6', 'Opus 4.6', 'Best for everyday, complex tasks'],
+      ['claude-sonnet-4-6', 'Sonnet 4.6', 'Efficient for routine tasks']
+    ] as const
+  ).map(([value, label, description]) => ({ value, label, description, efforts: value.includes('haiku') ? [] : ['low', 'medium', 'high', 'xhigh', 'max'] }))
 
 /** The on-demand `claude mcp list` in demo mode: the same servers, names and status only. */
 export const demoMcpList = (): Extract<McpListResult, { ok: true }> => ({

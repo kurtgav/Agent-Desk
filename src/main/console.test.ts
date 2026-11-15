@@ -49,7 +49,7 @@ const good: ConsoleStart = { cwd: HERE, prompt: 'hello', model: null, effort: 'l
 describe('registerConsole', () => {
   it('registers every console channel but the push', () => {
     const { handlers } = rig()
-    expect([...handlers.keys()].sort()).toEqual([IPC.consoleStart, IPC.consoleSend, IPC.consoleStop, IPC.consoleList, IPC.consoleHistory, IPC.consoleAllow, IPC.consoleMcpList, IPC.consoleMcpCancel].sort())
+    expect([...handlers.keys()].sort()).toEqual([IPC.consoleStart, IPC.consoleSend, IPC.consoleStop, IPC.consoleList, IPC.consoleHistory, IPC.consoleAllow, IPC.consoleMcpList, IPC.consoleMcpCancel, IPC.consoleModels].sort())
   })
 
   it('starts a conversation in a known folder, pushes its events to the window and lists it', async () => {

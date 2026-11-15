@@ -61,6 +61,7 @@ const bridge: AgentDeckBridge = {
   consoleAllow: (id, rule) => ipcRenderer.invoke(IPC.consoleAllow, id, rule),
   consoleMcpList: (cwd) => ipcRenderer.invoke(IPC.consoleMcpList, cwd),
   consoleMcpCancel: () => ipcRenderer.invoke(IPC.consoleMcpCancel),
+  consoleModels: () => ipcRenderer.invoke(IPC.consoleModels),
   onConsoleEvent: (listener) => on(IPC.consoleEvent, listener),
   onWorkChanged: (listener) => on(IPC.workChanged, () => listener()),
   getSessionMeta: () => ipcRenderer.invoke(IPC.getSessionMeta),

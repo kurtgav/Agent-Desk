@@ -162,6 +162,17 @@ export interface McpListed {
 
 export type McpListResult = { ok: true; servers: McpListed[]; at: number; cached: boolean } | { ok: false; error: string }
 
+/** One model as Claude Code's own picker lists it (the `initialize` answer). `value` is what `--model` takes; `default` means none. */
+export interface ModelInfo {
+  value: string
+  label: string
+  description: string
+  /** The effort levels it takes, empty when it takes none. */
+  efforts: string[]
+}
+
+export type ModelListResult = { ok: true; models: ModelInfo[]; at: number } | { ok: false; error: string }
+
 /** `untrusted`: the folder needs `claude` run there once to accept the trust prompt (S6, R18). */
 export type ConsoleStartResult = { ok: true; id: string } | { ok: false; error: string; untrusted: boolean }
 

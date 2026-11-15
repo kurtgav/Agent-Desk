@@ -1,4 +1,4 @@
-import type { ConsoleAllowResult, ConsoleEvent, ConsoleImage, ConsoleStart, ConsoleStartResult, ConsoleSummary, McpListResult } from './console'
+import type { ConsoleAllowResult, ConsoleEvent, ConsoleImage, ConsoleStart, ConsoleStartResult, ConsoleSummary, McpListResult, ModelListResult } from './console'
 import type { History, SessionDetail } from './detail'
 import type { CustomRoleInput, RoleDetail, RoleHit, RoleRepoResult, RoleSaveResult, RoleSkillsResult, RolesCatalog, RolesStatus } from './roles'
 import type { SectionOp, SessionMetaPatch, SessionMetaResult, SessionMetaState } from './session-meta'
@@ -202,6 +202,8 @@ export interface AgentDeckBridge {
   consoleMcpList(cwd: string | null): Promise<McpListResult>
   /** Stops a check that is running. */
   consoleMcpCancel(): Promise<void>
+  /** The models Claude Code offers this account, as its own picker lists them. */
+  consoleModels(): Promise<ModelListResult>
   onConsoleEvent(listener: (e: ConsoleEvent) => void): () => void
   /** Tasks or the daily report changed (a session moved, a task was edited): refetch what is on screen. */
   onWorkChanged(listener: () => void): () => void
@@ -292,6 +294,7 @@ export const IPC = {
   consoleAllow: 'console:allow',
   consoleMcpList: 'console:mcp-list',
   consoleMcpCancel: 'console:mcp-cancel',
+  consoleModels: 'console:models',
   consoleEvent: 'console:event',
   workChanged: 'work:changed',
   getSessionMeta: 'session-meta:get',

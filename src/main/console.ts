@@ -4,13 +4,14 @@ import { z } from 'zod'
 import { EFFORTS, IPC, type ActionResult } from '@shared/bridge'
 import {
   ADD_DIRS_MAX, APPEND_PROMPT_MAX, BUDGET_USD_MAX, CONSOLE_PROMPT_MAX, CONVERSATION_ID, HELPERS_MAX, IMAGES_MAX, IMAGE_BASE64_MAX, IMAGE_TYPES, MODEL_PATTERN, PERMISSION_MODES, RESUME_PATTERN, TOOL_RULE, TOOL_RULES_MAX,
-  isFallbackModels, type ConsoleAllowResult, type ConsoleEvent, type ConsoleStartResult, type ConsoleSummary, type McpListResult
+  isFallbackModels, type ConsoleAllowResult, type ConsoleEvent, type ConsoleStartResult, type ConsoleSummary, type McpListResult, type ModelListResult
 } from '@shared/console'
 import { ROLE_ID } from '@shared/roles'
 import { cleanEnv } from '../collector/cli'
 import { LOCAL_PATH, NO_CLI } from './actions'
 import { ConsoleHub } from './console-hub'
 import { McpList } from './console-mcp'
+import { ModelList } from './console-models'
 import type { ClaudeCommand } from './console-proc'
 import { INLINE_ROLE_MAX_BYTES, planRole, removeRoleFile, sweepRoleFiles, type MentionTarget } from './console-roles'
 import { isShim } from './console-proc'
@@ -90,6 +91,7 @@ const TOO_LONG = `That message is longer than ${CONSOLE_PROMPT_MAX.toLocaleStrin
 export function registerConsole(ctx: MainCtx, deps: ConsoleDeps): Dispose {
   const watched = new WeakSet<BrowserWindow>()
   const mcp = new McpList()
+  const models = new ModelList()
   /** Definitions files for conversations started as a role (console-roles.ts). Nothing is running yet, so whatever is there is left over from a crash. */
   const tmpDir = join(ctx.userData(), 'tmp')
   void sweepRoleFiles(tmpDir)
@@ -212,6 +214,12 @@ export function registerConsole(ctx: MainCtx, deps: ConsoleDeps): Dispose {
     return cmd ? mcp.list(cmd, cwd.data, cleanEnv()) : { ok: false, error: NO_CLI }
   }
 
+  async function modelList(): Promise<ModelListResult> {
+    if (ctx.demo()) return { ok: false, error: DEMO_TEXT }
+    const cmd = await deps.command()
+    return cmd ? models.list(cmd, cleanEnv(), join(ctx.userData(), 'model-list')) : { ok: false, error: NO_CLI }
+  }
+
   function history(rawId: unknown): ConsoleEvent[] {
     const id = ConversationId.safeParse(rawId)
     return ctx.demo() || !id.success ? [] : hub.history(id.data)
@@ -225,9 +233,11 @@ export function registerConsole(ctx: MainCtx, deps: ConsoleDeps): Dispose {
   ctx.handle(IPC.consoleAllow, (_e, id, rule) => allow(id, rule))
   ctx.handle(IPC.consoleMcpList, (_e, cwd) => mcpList(cwd))
   ctx.handle(IPC.consoleMcpCancel, () => mcp.cancel())
+  ctx.handle(IPC.consoleModels, () => modelList())
 
   return () => {
     mcp.cancel()
+    models.cancel()
     hub.dispose()
   }
 }
