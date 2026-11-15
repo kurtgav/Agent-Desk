@@ -5,6 +5,7 @@ import { greeting } from '@/lib/profile'
 import { needsOkCount } from '@/lib/selectors'
 import { Avatar } from '../Avatar'
 import { NeedsYou } from '../NeedsYou'
+import { RoleEmoji } from '../roles/RoleEmoji'
 import { STARTERS } from '../console/options'
 import { NEW, focusComposer, setText } from '../console/store'
 import { ComposerSlot } from './ComposerSlot'
@@ -53,25 +54,32 @@ function Recent({ entries, now }: { entries: SessionEntry[]; now: number }) {
   const roles = useRoleIndex()
   return (
     <ul className="mt-1.5 flex flex-col" aria-label="Recent sessions">
-      {entries.map((e) => (
-        <li key={e.key} className="border-t border-rule first:border-t-0">
-          <button type="button" onClick={() => open(e.key)} className="press flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent">
-            <Avatar seed={e.session.name} size={28} className="flex-none" />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5">
-                <span className={e.unread ? 'truncate text-[14px] font-semibold' : 'truncate text-[14px] font-medium'}>{e.name}</span>
-                {e.role && roles.get(e.role) && <span aria-label={roles.get(e.role)!.name} className="flex-none text-[13px] leading-none">{roles.get(e.role)!.emoji}</span>}
+      {entries.map((e) => {
+        const role = e.role ? roles.get(e.role) : undefined
+        return (
+          <li key={e.key} className="border-t border-rule first:border-t-0">
+            <button type="button" onClick={() => open(e.key)} className="press flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent">
+              <Avatar seed={e.session.name} size={28} className="flex-none" />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <span className={e.unread ? 'truncate text-[14px] font-semibold' : 'truncate text-[14px] font-medium'}>{e.name}</span>
+                  {role && (
+                    <span role="img" aria-label={`Runs as ${role.name}`} title={`Runs as ${role.name}`} className="flex-none">
+                      <RoleEmoji role={role} size={16} />
+                    </span>
+                  )}
+                </span>
+                <span className="block truncate text-[12px] leading-4 text-muted">
+                  {e.project || 'No folder'}
+                  {e.origin === 'watching' ? ' · Watching' : ''} · {e.session.activity.replaceAll('`', '')}
+                </span>
               </span>
-              <span className="block truncate text-[12px] leading-4 text-muted">
-                {e.project || 'No folder'}
-                {e.origin === 'watching' ? ' · Watching' : ''} · {e.session.activity.replaceAll('`', '')}
-              </span>
-            </span>
-            <StatusMark status={e.session.status} />
-            <span className="w-8 flex-none text-right text-[12px] tabular-nums text-muted">{shortAgo(e.at, now)}</span>
-          </button>
-        </li>
-      ))}
+              <StatusMark status={e.session.status} />
+              <span className="w-8 flex-none text-right text-[12px] tabular-nums text-muted">{shortAgo(e.at, now)}</span>
+            </button>
+          </li>
+        )
+      })}
     </ul>
   )
 }

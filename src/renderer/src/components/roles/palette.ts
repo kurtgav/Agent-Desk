@@ -19,7 +19,7 @@ export function useRoleCommands(query: string): Command[] {
   return searchRoles(catalog.roles, query, SHOWN).flatMap((hit) => {
     const r = byId.get(hit.id)
     return r
-      ? [{ id: `role:${r.id}`, group: 'Roles' as const, label: r.name, meta: r.divisionLabel, icon: Users, emoji: r.emoji, run: () => useUi.getState().go({ page: 'roles', role: r.id }) }]
+      ? [{ id: `role:${r.id}`, group: 'Roles' as const, label: r.name, meta: r.divisionLabel, icon: Users, role: r, emoji: r.emoji, run: () => useUi.getState().go({ page: 'roles', role: r.id }) }]
       : []
   })
 }

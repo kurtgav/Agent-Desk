@@ -5,6 +5,8 @@ import { useUi, type Nav, type Page } from '@/store'
 import { openChangedFile } from '@/lib/act'
 import { projectName, recentProjects } from '@/lib/selectors'
 import { latestPerPath } from './RecentFiles'
+import type { RoleSummary } from '@shared/roles'
+import { RoleEmoji, roleFace } from './roles/RoleEmoji'
 import { useRoleCommands } from './roles/palette'
 import { PAGE_TITLE } from './pages/Page'
 import { openReportFolder, openSettings } from './settings/actions'
@@ -18,7 +20,8 @@ export interface Command {
   label: string
   meta?: string
   icon: LucideIcon
-  /** Drawn in place of the icon (a role's face). */
+  /** Drawn in place of the icon (a role's face): its mascot, else its emoji. */
+  role?: RoleSummary
   emoji?: string
   run(): void
 }
@@ -202,7 +205,9 @@ function Results({ close }: { close(): void }) {
                   onClick={() => run(c)}
                   className={cn('flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-[13px]', i === index && 'bg-well')}
                 >
-                  {c.emoji ? (
+                  {c.role && roleFace(c.role) ? (
+                    <RoleEmoji role={c.role} size={15} />
+                  ) : c.emoji ? (
                     <span className="flex size-[15px] flex-none items-center justify-center text-[14px] leading-none" aria-hidden>
                       {c.emoji}
                     </span>

@@ -11,7 +11,7 @@ export function CardFace({ role, showDivision, matched, descId }: { role: RoleSu
   return (
     <>
       <span className="flex items-start gap-3">
-        <RoleEmoji emoji={role.emoji} color={role.color} size={40} />
+        <RoleEmoji role={role} size={40} />
         <span className="min-w-0 flex-1">
           <span className="t-title block truncate pr-8">{role.name || 'Untitled role'}</span>
           <span className="t-meta line-clamp-2 text-muted">{role.vibe || role.divisionLabel}</span>

@@ -88,7 +88,7 @@ export function MentionList({ rows, active, listId, label, onPick, onActive, roo
               }}
               className={cn('absolute inset-x-0 flex cursor-default items-center gap-3 rounded-lg px-2', on && 'bg-hover')}
             >
-              <RoleEmoji emoji={r.emoji} color={r.color} size={32} />
+              <RoleEmoji role={r} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <span className="truncate text-[13px] font-medium">{r.name}</span>

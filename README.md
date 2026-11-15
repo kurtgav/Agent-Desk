@@ -205,4 +205,4 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 
 [MIT](LICENSE) © 2026 Kurt Gavin. Built by Third Code.
 
-The bot mascot is "helper-robot" from [IP as Logo](https://visualskills.dev/ip-as-logo), whose README says every logo there is free for commercial use ([source](https://github.com/s1dashu/ip-as-logo-skill)). The agent avatars (a mascot per agent name, in `src/renderer/src/assets/agents`) are more logos from the same gallery under that same sentence. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The bot mascot is "helper-robot" from [IP as Logo](https://visualskills.dev/ip-as-logo), whose README says every logo there is free for commercial use ([source](https://github.com/s1dashu/ip-as-logo-skill)). The agent avatars (a mascot per agent name, in `src/renderer/src/assets/agents`) are more logos from the same gallery under that same sentence, and so are the role mascots (one per role, chosen to fit what the role does, in `src/renderer/src/assets/roles`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

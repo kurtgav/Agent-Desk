@@ -12,6 +12,7 @@ import { RoleBrowser } from './RoleBrowser'
 import { RoleCard } from './RoleCard'
 import { PromptPreview, blocks } from './PromptPreview'
 import { RepoSetup } from './Sources'
+import { RoleEmoji, roleFace } from './RoleEmoji'
 import { roleIcon } from './icons'
 import { sectionsFor } from './logic'
 import { useRoleCommands } from './palette'
@@ -70,7 +71,7 @@ describe('RoleCard', () => {
   it('renders a hostile name and description as text', () => {
     const evil = { ...role('CTO'), name: '<img src=x onerror=alert(1)>', description: '<script>alert(1)</script>', vibe: '"><svg onload=alert(1)>' }
     const h = html({ role: evil })
-    expect(h).not.toMatch(/<img|<script|<svg onload/)
+    expect(h).not.toMatch(/<img src=x|<script|<svg onload/) // the mascot is an <img> of its own
     expect(h).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(h).toContain('&lt;svg onload=alert(1)&gt;')
   })
@@ -253,5 +254,19 @@ describe('the palette finds roles', () => {
     expect(typed.length).toBeLessThanOrEqual(6)
     typed[0]!.run()
     expect(useUi.getState().nav).toEqual({ page: 'roles', role: 'cto' })
+  })
+})
+
+describe('role mascots', () => {
+  it('gives every catalog role a picture of its own, and a role you wrote keeps its emoji', () => {
+    const shipped = roles.filter((r) => r.source === 'agency' || r.source === 'builtin')
+    const arts = shipped.map((r) => roleFace(r))
+    expect(shipped.length).toBeGreaterThan(30)
+    expect(arts.filter((a) => !a).length).toBe(0)
+    expect(new Set(arts).size).toBe(arts.length)
+    const mine = roles.find((r) => r.source === 'custom')!
+    expect(roleFace(mine)).toBeNull()
+    expect(render(createElement(RoleEmoji, { role: mine }))).toContain(mine.emoji)
+    expect(render(createElement(RoleEmoji, { role: role('Frontend Developer') }))).toContain('<img')
   })
 })

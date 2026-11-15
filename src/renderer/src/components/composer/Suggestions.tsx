@@ -60,7 +60,7 @@ export function Suggestions({ hits, index, onPick, label = 'Suggested agents' }:
             onClick={() => onPick(role.id)}
             className="press anim-fade inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-surface pl-1 pr-2.5 text-[13px] outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <RoleEmoji emoji={role.emoji} color={role.color} size={20} />
+            <RoleEmoji role={role} size={20} />
             <span className="max-w-36 truncate">{role.name}</span>
           </button>
         </Hint>

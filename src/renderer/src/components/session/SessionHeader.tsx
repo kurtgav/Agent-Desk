@@ -6,6 +6,7 @@ import { useUi } from '@/store'
 import { sessionAction } from '@/lib/act'
 import type { SessionEntry } from '@/lib/sessionList'
 import { Avatar } from '../Avatar'
+import { RoleEmoji } from '../roles/RoleEmoji'
 import { formatCost } from '../console/format'
 import { isRunning, stopConversation, useConsole } from '../console/store'
 import { MoreButton, SessionMenu } from '../session-menu/SessionMenu'
@@ -62,8 +63,8 @@ function Chips({ entry, role }: { entry: SessionEntry; role: RoleSummary | undef
   return (
     <>
       {role && (
-        <span className="inline-flex h-6 flex-none items-center gap-1 rounded-full bg-well px-2 text-[12px] font-medium" title={`Runs as ${role.name}`}>
-          <span aria-hidden>{role.emoji}</span>
+        <span className="inline-flex h-6 flex-none items-center gap-1 rounded-full bg-well pl-1 pr-2 text-[12px] font-medium" title={`Runs as ${role.name}`}>
+          <RoleEmoji role={role} size={16} />
           <span className="sr-only">Runs as </span>
           <span className="max-w-40 truncate">{role.name}</span>
         </span>

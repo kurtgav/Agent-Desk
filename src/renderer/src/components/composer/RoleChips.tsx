@@ -25,7 +25,7 @@ function Chip({ role, lead, actions }: { role: RoleSummary; lead: boolean; actio
       <Menu.Root>
         <Menu.Trigger asChild>
           <button type="button" aria-label={`${lead ? 'Leading' : 'Also'}: ${role.name}. Change`} className="press flex h-7 items-center gap-1.5 rounded-full pr-1 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent">
-            <RoleEmoji emoji={role.emoji} color={role.color} size={20} />
+            <RoleEmoji role={role} size={20} />
             <span className="max-w-32 truncate">{role.name}</span>
             <ChevronDown size={12} strokeWidth={1.75} aria-hidden className="text-muted" />
           </button>

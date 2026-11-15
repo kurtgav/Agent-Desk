@@ -55,7 +55,7 @@ describe('the @ list with about 350 agents', () => {
     )
     expect(out).toContain('CTO')
     expect(out).toContain('Leadership')
-    expect(out).toContain('🧭')
+    expect(out).toMatch(/<img[^>]*cto.webp/) // its mascot (lib/roleArt.ts)
     expect(out).toMatch(/@(<!-- -->)?cto/)
     expect(out).toContain('Calm, plain-spoken')
   })

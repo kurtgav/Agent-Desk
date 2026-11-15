@@ -156,7 +156,7 @@ function Body({ detail: d, pinned, skill, skillsPath, onClose, onEdit, onCopied 
     <>
       <header className="flex-none px-5 pb-4 pt-5">
         <div className="flex items-start gap-3">
-          <RoleEmoji emoji={d.emoji} color={d.color} size={56} />
+          <RoleEmoji role={d} size={56} />
           <div className="min-w-0 flex-1 pt-0.5">
             <Dialog.Title className="t-heading text-balance">{d.name}</Dialog.Title>
             <p className="mt-0.5 text-pretty text-[13px] leading-5 text-muted">{d.vibe}</p>
