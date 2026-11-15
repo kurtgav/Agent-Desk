@@ -43,24 +43,28 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 | + New | **New task** | focuses the composer |
 | search icon | search | opens the Ctrl+K palette |
 | Home | Home | route |
-| Projects | **Sessions** | all sessions table (live + 30 d history), filters by surface/status/project |
-| Templates | **Approvals** + badge | open P1 items + audit log; badge = open P1 count |
-| Artifacts | **Files** | `files` table, grouped by project |
-| Tasks + count | **Activity** | event timeline across sessions |
+| (none) | **Console** | conversations with Claude Code started here (D-154): a rail of conversations (title, folder, state, cost, Resume a session), the open thread (messages, collapsed thinking, tool cards, turn footers), a composer with folder, model, effort and permission mode. Ctrl+N starts one, Esc stops the turn. Message text is in memory only |
+| (none) | **Tasks** | three lanes (D-127): your to-dos (`listTasks`, `addTask`, `updateTask`, `removeTask`) beside live sessions from the snapshot; quick-add row on top; actions appear on hover or focus without moving the layout (D-129) |
+| Projects | **Sessions** | the snapshot's sessions (live + ended this week, D-117), newest activity first; filters by status, surface, project. Row: avatar, name (opens the drawer), "activity · project · surface", age, status pill |
+| Templates | **Approvals** + badge | open P1 items, all expanded, + audit log (newest 300; what, session, project, wait, hash prefix, outcome; D-119); badge = open P1 count |
+| Artifacts | **Files** | latest change per path, one card per project, path filter; rows as Home's Recent files (D-120) |
+| Tasks + count | **Activity** | newest 300 events across sessions (D-118), filter; a row opens its session's drawer |
+| (none) | **Daily report** | day rail (`listEodDays`) beside the report (`getEod`); status line from `getSettings().eod`; toolbar Copy as Markdown (`copyText`), Write file now (`writeEod`), Open folder (`openEodFolder`); notes use `saveEodNotes` (D-131, D-132). Grouped under **Review** with Files and Activity (D-140) |
 | Recent (4 projects) | **Recent** | 5 most recently active project folders (cwd, normalized); click filters Sessions |
-| Teams (Product, Growth) | **Agents** | subagents used in the last 7 days (max 6, from `subagent.started.agentType`) + "All agents (N)" → page listing `~/.claude/agents` and project `.claude/agents` (name, description, model, color from frontmatter; read-only). 346 exist on this machine, so they are never listed inline |
-| Credits card (760 left of 2,000, Pro, Resets, Upgrade) | **Usage** card | today and this week tokens + **estimated** cost vs the budget you set; progress bar = week vs budget. Telemetry off → "Enable usage (OTel)" button (consent flow, ADR-0007). No plan badge, no Upgrade |
-| Maya Chen + email + gear | **Kurt** + settings gear | display name from Settings (default "Kurt", D-014). No email or account data. Gear opens Settings |
+| Teams (Product, Growth) | **Agents** | subagents used in the last 7 days (max 6, from `subagent.started.agentType`) + "All agents (N)" → page listing `~/.claude/agents` and the 5 recent projects' `.claude/agents` (name, where, model, description from frontmatter; read-only; "Start a task" picks it in the composer, D-121). 346 exist on this machine, so they are never listed inline |
+| Credits card (760 left of 2,000, Pro, Resets, Upgrade) | **Usage** card | today and this week tokens + **estimated** cost vs the budget you set; progress bar = week vs budget. Telemetry off → the line "Usage appears when Claude Code telemetry is on." and no button (D-139). No plan badge, no Upgrade |
+| Maya Chen + email + gear | profile name + photo + settings gear | name and photo from Settings (default: the Windows account's first name, "Kurt" in demo, D-137); initials when there is no photo. No email or account data. The user block and the gear open Settings |
 
 ## Top bar
 | Reference | AgentDeck | Data / action |
 |---|---|---|
-| ⌂ Home breadcrumb + ☆ | breadcrumb | current route (Home / Sessions / session name). Star dropped (no data) |
-| Search in project ⌘K | **Search… Ctrl+K** | palette: sessions, projects, files, actions (New task, Pause notifications, Diagnostics, Install integration…) |
+| ⌂ Home breadcrumb + ☆ | breadcrumb | current page (Home › Sessions › project); Home goes back. The drawer is a dialog, so it is not a crumb. Star dropped (no data) |
+| Search in project ⌘K | **Search… Ctrl+K** | palette (D-122): pages, sessions, projects, changed files, actions (New task, Pause/Resume notifications, Remote approvals…, Diagnostics, Open daily report folder) |
 | blue app chip | **Live chip** | `Live` (hooks installed, no settings conflict, collector up), `Paused` (notifications paused; tooltip says until when), `Hooks missing` (red, also for a conflict, D-068; click → install dialog with the masked diff). Hidden in demo and while the collector is down (that banner says so). *M3:* no "event < 30 s" condition: an idle machine sends nothing, and that is still live (D-078) |
 | avatar stack | active agents | up to 3 avatars of Working/Needs-you sessions, "+N" overflow; click → Sessions |
 | Share | **New task** (pill) | focuses composer / opens dispatch dialog |
-| ⋯ | overflow | Pause notifications (1 h / until tomorrow 08:00 / resume, D-067), Uninstall integration… (live only, D-069), Diagnostics, Settings (M5) |
+| (none) | **Theme** (split button) | one click flips light and dark; the chevron opens Light, Dark, Use system settings (D-146) |
+| ⋯ | overflow | Pause notifications (1 h / until tomorrow 08:00 / resume, D-067), Remote approvals… (live only: the install dialog with the opt-in and its diff, D-104), Uninstall integration… (live only, D-069), Diagnostics (opens Settings at Diagnostics), Settings |
 
 ## Greeting + composer
 | Reference | AgentDeck | Data / action |
@@ -68,13 +72,13 @@ The visual spec is `docs/reference/dashboard.png`. AgentDeck matches its layout,
 | "Tuesday, November 3" | local date | `Intl.DateTimeFormat` |
 | "Good morning, Maya" | "Good morning/afternoon/evening, Kurt" | local hour |
 | "3 things need your OK. Agents finished 6 tasks overnight." | live summary | "{P1 count} things need your OK" (omitted at 0) + "Agents finished {n} tasks while you were away" (since the window last had focus, D-007); fallback "All quiet." |
-| Composer "Ask your agents to…" | dispatch composer | `claude --bg --name <auto> [--agent a] [--model m] [--effort e] "<prompt>"` via cross-spawn, arg array, cwd = chosen project. Errors are shown inline; `Workspace not trusted` → "Open a terminal in <folder> and run `claude` once to trust it" + button that opens a terminal there |
-| + | project picker | recent cwds + Browse… |
-| @ | subagent mention | inserts `--agent` choice |
+| Composer "Ask your agents to…" | dispatch composer | `claude --bg --name <auto> [--agent a] --effort e "<prompt>"` via cross-spawn, arg array, cwd = chosen project (D-098). Enter sends, Shift+Enter is a new line. Success clears the text and shows "Started <name> in <project>."; other errors show in the notice. `Workspace not trusted` shows the CLI's own sentence inline with **Run claude there**, which opens `claude` in that folder in a terminal so its trust prompt can be accepted (D-100). No model control (D-098) |
+| + | project picker | recent session cwds + Browse… (a folder dialog; the pick counts for this run, D-099) |
+| @ | subagent mention | search picker; inserts `@agent-<name> ` at the caret (D-102) |
 | mic | **dropped** | no data/action |
-| Agent ▾ | subagent picker | sets `--agent` |
+| Agent ▾ | subagent picker | search picker over `~/.claude/agents` + the project's `.claude/agents`, project wins (D-101); sets `--agent`, or Default |
 | ⚡ Max chip | effort chip | cycles low, medium, high, xhigh, max → `--effort` |
-| ↑ send | send | dispatch; disabled while prompt empty or no project |
+| ↑ send | send | dispatch; `aria-disabled` with the reason as its tooltip while the prompt is empty, no project is chosen, or a dispatch is starting |
 
 ## KPI cards
 | Reference | AgentDeck | Definition |
@@ -90,8 +94,8 @@ Before the first snapshot, and whenever the collector exits until main has resta
 ## Main column
 | Reference | AgentDeck | Data / action |
 |---|---|---|
-| Needs your approval (3) + See all | **Needs you** (count) + See all (expands in place; the Approvals page is M4, D-070) | attention items sorted priority→age (STATE_MACHINE § 3). Row: type icon, title (exact tool/command or question), meta "agent · project · age", risk flag chips |
-| Reject / Approve | actions | **Only on held P1 approvals** (remote approvals on). Risky items → confirm dialog showing the full command. Otherwise: **Attach** (bg), **Open in Desktop** (Desktop surface), **Answer in terminal** (interactive CLI; shows cwd), **Open**, **Dismiss** (P2–P4) |
+| Needs your approval (3) + See all | **Needs you** (count) + See all (expands in place, D-070; the Approvals page holds the P1 items and the audit log, D-119) | attention items sorted priority→age (STATE_MACHINE § 3). Row: type icon, title (exact tool/command or question), meta "agent · project · age", risk flag chips |
+| Reject / Approve | actions | **Only on held P1 approvals** (remote approvals on, and only for a request the row shows in full, D-113; the row's hint says how long it waits here). Approve sends allow once, Reject sends deny with "Rejected in AgentDeck", and the outcome shows in the notice (D-106, D-108). Risky items → confirm dialog showing the full command. Otherwise: **Attach** (bg), **Open in Desktop** (Desktop surface), **Answer in terminal** (interactive CLI; shows cwd), **Open**, **Dismiss** (P2–P4) |
 | Running now (4) + View tasks | **Running now** (count) + View all → Sessions | one row per working/needs-you session; subagents nested (indented, type + task). Activity text from latest tool (EVENT_SCHEMA § Activity text). "Step 2 of 4" from tasks; bar determinate only with a plan, else indeterminate |
 | "About 2 min left" | caption | elapsed "12m" or "Waiting 3m". **No ETAs** |
 
@@ -99,7 +103,7 @@ Before the first snapshot, and whenever the collector exits until main has resta
 | Reference | AgentDeck | Data / action |
 |---|---|---|
 | Recent files + See all | **Recent files** | last 4 from `files`: name, "project · agent · 2 min ago", type icon from extension. Click → `code -g <path>` (cross-spawn; error toast if VS Code missing). See all → Files |
-| Your agents (6) tiles | **Your agents** | one tile per active or recent (24 h) session/agent: generated avatar, name, status pill. Click → session drawer |
+| Your agents (6) tiles | **Your agents** | one tile per active or recent (24 h) session/agent: mascot picture (D-147), name, status pill. Click → session drawer |
 
 ## Session drawer (opens from any row)
 - **Header:** name, surface, cwd, status pill, model (OTel or `--model`), started.

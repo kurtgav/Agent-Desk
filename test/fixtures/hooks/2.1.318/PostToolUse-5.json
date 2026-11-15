@@ -1,6 +1,6 @@
 {
   "session_id": "2afb6f39-5dd7-4a3c-a86f-840775c89dd5",
-  "transcript_path": "C:\\Users\\MSI\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5.jsonl",
+  "transcript_path": "C:\\Users\\dev\\.claude\\projects\\D--personal-agentdeck-spikes-scratch\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5.jsonl",
   "cwd": "D:\\personal\\agentdeck\\spikes\\scratch",
   "prompt_id": "620ab80a-3329-434a-95bf-f0ea3c93fb2b",
   "permission_mode": "default",
@@ -22,7 +22,7 @@
     "description": "Count files in scratch folder",
     "resolvedModel": "claude-haiku-5-5",
     "prompt": "Report how many files are in the folder D:\\personal\\agentdeck\\spikes\\scratch (count files only, not subfolders). Answer with the number and list the file names.",
-    "outputFile": "C:\\Users\\MSI\\AppData\\Local\\Temp\\claude\\306b45723b92d684\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5\\tasks\\adb875602d90356fb.output",
+    "outputFile": "C:\\Users\\dev\\AppData\\Local\\Temp\\claude\\306b45723b92d684\\2afb6f39-5dd7-4a3c-a86f-840775c89dd5\\tasks\\adb875602d90356fb.output",
     "canReadOutputFile": true,
     "canContinueAgent": true
   },

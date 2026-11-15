@@ -1,0 +1,14 @@
+{
+  "session_id": "019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50",
+  "turn_id": "019a7c2e-61aa-7d03-8b12-77e0c4d9a201",
+  "transcript_path": "C:\\Users\\dev\\.codex\\sessions\\2026\\11\\15\\rollout-2026-11-15T13-10-00-019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50.jsonl.zst",
+  "cwd": "C:\\work\\demo",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.6-luna",
+  "permission_mode": "default",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Add File: C:\\work\\demo\\notes.txt\n+SENTINEL-FILE-BODY\n*** End Patch\n"
+  },
+  "tool_use_id": "exec-9f2c1d70-4b6e-4a55-8e3d-1c0b2a9f8e71"
+}

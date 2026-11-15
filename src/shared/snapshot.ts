@@ -14,6 +14,15 @@ export type Status = z.infer<typeof Status>
 export const Surface = z.enum(['cli', 'desktop', 'vscode', 'background', 'sdk'])
 export type Surface = z.infer<typeof Surface>
 
+/** Agent CLIs AgentDeck watches (ADR-0014). */
+export const Provider = z.enum(['claude', 'codex'])
+export type Provider = z.infer<typeof Provider>
+export const PROVIDER_NAME: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex CLI' }
+/** A plain monogram for rows (never a vendor logo: D-145, D-170); Claude Code, the default, carries none. */
+export const PROVIDER_MARK: Record<Provider, string> = { claude: '', codex: 'CX' }
+/** The session id says whose it is: other CLIs' ids carry their name in front (collector/normalize sessionKey). */
+export const providerOf = (sessionId: string): Provider => (sessionId.startsWith('codex:') ? 'codex' : 'claude')
+
 export const Subagent = z.object({
   id: z.string(),
   agentType: z.string(),
@@ -39,7 +48,13 @@ export const Session = z.object({
   /** From TaskCreated/TaskCompleted; null when no plan exists. */
   plan: z.object({ done: z.number().int().nonnegative(), total: z.number().int().positive() }).nullable(),
   waitingSince: Ts.nullable(),
-  subagents: z.array(Subagent)
+  /** The session's own process, when the poll or a hook told us: "Answer in terminal" walks up from it to the window that hosts it. */
+  pid: z.number().int().positive().nullable().optional(),
+  subagents: z.array(Subagent),
+  /** The agent CLI that runs it (ADR-0014); absent = Claude Code, so older snapshots and demo data still parse. */
+  provider: Provider.optional(),
+  /** The model the CLI reported, as it named it (Codex sends one with every hook). */
+  model: z.string().max(80).optional()
 })
 export type Session = z.infer<typeof Session>
 
@@ -78,9 +93,41 @@ export const Usage = z.object({
   weekTokens: z.number().int().nonnegative(),
   todayCostUsd: z.number().nonnegative(),
   weekCostUsd: z.number().nonnegative(),
-  weeklyBudgetUsd: z.number().positive()
+  weeklyBudgetUsd: z.number().positive(),
+  // Everything below is optional, so snapshots from before the log source (and the demo's) still parse. It is set only when the
+  // figures come from Claude Code's local logs (`usage.readLogs`, ADR-0009 amendment). Absent `source` means Claude Code's OTel export.
+  source: z.enum(['otel', 'logs']).optional(),
+  /** Some request in the week ran on a model with no known price, so the cost is a floor. */
+  costPartial: z.boolean().optional(),
+  /** The estimated 5-hour window open now (ccusage's rule): a guess at Claude's rolling window, never the plan's real limit. */
+  block: z.object({ startedAt: Ts, endsAt: Ts, tokens: z.number().int().nonnegative() }).nullable().optional(),
+  /** This week's busiest models by tokens, at most three. */
+  topModels: z.array(z.object({ model: z.string(), tokens: z.number().int().nonnegative() })).max(3).optional(),
+  /** Reading the logs: files known, when a figure last changed, and the first pass's progress while it runs. */
+  logs: z
+    .object({
+      files: z.number().int().nonnegative(),
+      lastAt: Ts.nullable(),
+      scan: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).nullable()
+    })
+    .optional()
 })
 export type Usage = z.infer<typeof Usage>
+
+/** One of the plan's own limit windows, as Claude Code's status line passes it: the share used and when it resets (epoch ms). */
+export const PlanWindow = z.object({ usedPct: z.number().min(0).max(100), resetsAt: Ts })
+export type PlanWindow = z.infer<typeof PlanWindow>
+
+/**
+ * The plan's real limits (ADR-0009 amendment, status line): the 5-hour session and the 7-day week, each null when Claude Code
+ * did not pass it or it has reset since. `at` is when the status line last saved them.
+ */
+export const PlanLimits = z.object({ session: PlanWindow.nullable(), week: PlanWindow.nullable(), at: Ts })
+export type PlanLimits = z.infer<typeof PlanLimits>
+
+/** D-046: the snapshot keeps the newest 50 sessions and the newest 200 changed files; the list pages say so. */
+export const SNAPSHOT_SESSIONS_MAX = 50
+export const SNAPSHOT_FILES_MAX = 200
 
 export const Snapshot = z.object({
   mode: z.enum(['demo', 'live']),
@@ -101,6 +148,8 @@ export const Snapshot = z.object({
   }),
   /** Null when telemetry is off (ADR-0007): the Usage card shows the enable prompt. */
   usage: Usage.nullable(),
+  /** Null or absent while the status line switch is off or nothing was saved yet; optional so older snapshots still parse. */
+  planLimits: PlanLimits.nullable().optional(),
   recentAgentTypes: z.array(z.string()),
   agentDefinitionCount: z.number().int().nonnegative()
 })

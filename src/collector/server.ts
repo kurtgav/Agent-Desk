@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import type { HookOrigin } from './normalize'
 
 /** ADR-0010: bodies above this get 413. */
 export const MAX_BODY = 1024 * 1024
@@ -8,12 +9,31 @@ const HOST = '127.0.0.1'
 /** Hook requests are small and local; a stalled client must not hold a socket open. */
 const REQUEST_TIMEOUT_MS = 10_000
 
+/** Claude Code posts to /hooks itself; other agent CLIs post to /hooks/<provider> through a shim (ADR-0014). */
+export type HookMeta = HookOrigin
+const ROUTES: Record<string, HookOrigin['provider']> = { '/hooks': 'claude', '/hooks/codex': 'codex' }
+
+const pidOf = (v: string | string[] | undefined): number | null => {
+  const n = typeof v === 'string' && /^\d{1,10}$/.test(v.trim()) ? Number(v.trim()) : 0
+  return Number.isSafeInteger(n) && n > 0 ? n : null
+}
+
 export interface Handlers {
   token: string
-  /** Called after the 200 is sent (D-029): Claude Code never waits on our processing. */
-  onHook(raw: string, receivedAt: number): void
+  /**
+   * Must only queue the body (D-029): Claude Code never waits on our processing. The one exception is a request
+   * held for remote approvals (ADR-0006): the reply then waits for the promise, whose value is the JSON body
+   * (undefined = empty). `gone` aborts when the connection closes first.
+   */
+  onHook(raw: string, receivedAt: number, gone: AbortSignal, meta: HookMeta): Promise<unknown> | void
+  /** An OTLP/HTTP JSON metrics body (ADR-0007). Already answered with 200 when this runs. */
+  onMetrics(raw: string, receivedAt: number): void
   snapshot(): unknown
 }
+
+/** ADR-0007: only plain JSON is read. Protobuf (or any compressed body) answers 415, so the exporter can say why. */
+const readableAsJson = (req: IncomingMessage): boolean =>
+  /^application\/json\s*(?:;|$)/i.test(req.headers['content-type'] ?? '') && ['', 'identity'].includes((req.headers['content-encoding'] ?? '').toLowerCase())
 
 function tokenOk(given: string | string[] | undefined, token: string): boolean {
   if (typeof given !== 'string') return false
@@ -56,11 +76,25 @@ function handler(h: Handlers, port: () => number) {
     if (req.headers.host !== `${HOST}:${port()}` || req.headers.origin !== undefined) return reply(res, 403)
     if (!tokenOk(req.headers['x-agentdeck-token'], h.token)) return reply(res, 401)
     const url = req.url ?? '/'
-    if (req.method === 'POST' && url === '/hooks') {
+    const provider = req.method === 'POST' && Object.hasOwn(ROUTES, url) ? ROUTES[url]! : null
+    if (provider) {
+      const meta: HookMeta = { provider, pid: provider === 'claude' ? null : pidOf(req.headers['x-agentdeck-pid']) }
       return readBody(req, res, (raw) => {
-        const receivedAt = Date.now()
-        reply(res, 200) // empty body = success, no decision (D-029)
-        h.onHook(raw, receivedAt)
+        const gone = new AbortController()
+        const held = h.onHook(raw, Date.now(), gone.signal, meta)
+        if (!held) return reply(res, 200) // empty body = success, no decision (D-029); the body was only queued
+        res.once('close', () => gone.abort()) // also fires after our reply; the hold is settled by then
+        void held.then((body) => {
+          if (!res.destroyed && !res.writableEnded) reply(res, 200, body)
+        })
+      })
+    }
+    // Metrics only (ADR-0007 also lists /v1/logs; this build never asks Claude Code for logs, so prompts and tool content have no way in).
+    if (req.method === 'POST' && url === '/v1/metrics') {
+      if (!readableAsJson(req)) return reply(res, 415)
+      return readBody(req, res, (raw) => {
+        reply(res, 200, {}) // OTLP/HTTP success is an empty ExportMetricsServiceResponse
+        h.onMetrics(raw, Date.now())
       })
     }
     if (req.method === 'GET' && url === '/health') return reply(res, 200, { app: 'agentdeck', pid: process.pid })

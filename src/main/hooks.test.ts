@@ -2,7 +2,18 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { hooksState, install, previewInstall, previewUninstall, uninstall, type HookPaths } from './hooks'
+import { hookOptions, hooksState, install, previewInstall, previewUninstall, shapeFor, uninstall, type HookPaths } from './hooks'
+
+describe('remote approvals shape (ADR-0006)', () => {
+  it('stretches only the PermissionRequest timeout, to the wait plus 10 s, and a new shape asks for consent again', () => {
+    const off = { enabled: false, waitSec: 60 }
+    expect(hookOptions(off)).toEqual({})
+    expect(hookOptions({ enabled: true, waitSec: 60 })).toEqual({ permissionTimeoutSec: 70 })
+    expect(shapeFor({ ...off, waitSec: 90 })).toBe(shapeFor(off)) // the wait matters only while on
+    expect(shapeFor({ enabled: true, waitSec: 60 })).not.toBe(shapeFor(off))
+    expect(shapeFor({ enabled: true, waitSec: 90 })).not.toBe(shapeFor({ enabled: true, waitSec: 60 }))
+  })
+})
 
 const dirs: string[] = []
 afterEach(() => {

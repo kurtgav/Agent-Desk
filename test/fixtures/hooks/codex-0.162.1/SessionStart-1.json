@@ -1,0 +1,9 @@
+{
+  "session_id": "019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50",
+  "transcript_path": "C:\\Users\\dev\\.codex\\sessions\\2026\\11\\15\\rollout-2026-11-15T13-10-00-019a7c2e-5b1d-7f20-9c4e-2d8f6a1b3c50.jsonl.zst",
+  "cwd": "C:\\work\\demo",
+  "hook_event_name": "SessionStart",
+  "model": "gpt-5.6-luna",
+  "permission_mode": "default",
+  "source": "startup"
+}

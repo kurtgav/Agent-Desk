@@ -1,0 +1,8 @@
+SessionStart-1
+UserPromptSubmit-1
+PreToolUse-1
+PostToolUse-1
+PreToolUse-2
+PostToolUse-2
+Stop-1
+SessionEnd-1

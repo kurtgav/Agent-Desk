@@ -1,15 +1,19 @@
-import { CornerDownRight } from 'lucide-react'
+import { Activity, CornerDownRight } from 'lucide-react'
 import type { Session } from '@shared/snapshot'
 import { useUi } from '@/store'
 import { duration } from '@/lib/format'
 import { projectName, running } from '@/lib/selectors'
+import { pinnedFirst } from '@/lib/sessionMeta'
 import { Avatar } from './Avatar'
-import { Button, Card, CardHeader, Hint, Inline, PENDING_LABEL, pending } from './ui'
+import { useDisplayName } from './session-menu/hooks'
+import { Marks } from './session-menu/Marks'
+import { MoreButton, SessionMenu } from './session-menu/SessionMenu'
+import { Card, CardAction, CardHeader, EmptyState, Inline } from './ui'
 
 const MAX_ROWS = 4
 
 /** Progress is real or absent: plan steps when a plan exists, otherwise an indeterminate bar. No ETAs. */
-function Progress({ session, now }: { session: Session; now: number }) {
+function Progress({ session, name, now }: { session: Session; name: string; now: number }) {
   const waitingFor = session.waitingSince === null ? null : now - session.waitingSince
   const tone = waitingFor === null ? 'var(--working)' : 'var(--needs)'
   const plan = session.plan
@@ -18,7 +22,7 @@ function Progress({ session, now }: { session: Session; now: number }) {
       {plan ? (
         <div
           role="progressbar"
-          aria-label={`${session.name}: step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`}
+          aria-label={`${name}: step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`}
           aria-valuemin={0}
           aria-valuemax={plan.total}
           aria-valuenow={plan.done}
@@ -27,7 +31,7 @@ function Progress({ session, now }: { session: Session; now: number }) {
           <div className="h-full rounded-full" style={{ width: `${(plan.done / plan.total) * 100}%`, background: tone }} />
         </div>
       ) : (
-        <div role="progressbar" aria-label={`${session.name}: no plan`} className="h-1.5 overflow-hidden rounded-full bg-track">
+        <div role="progressbar" aria-label={`${name}: no plan`} className="h-1.5 overflow-hidden rounded-full bg-track">
           {waitingFor === null && <div className="bar-indeterminate h-full w-1/3 rounded-full bg-[var(--working)]" />}
         </div>
       )}
@@ -44,40 +48,54 @@ function Progress({ session, now }: { session: Session; now: number }) {
 
 function Row({ session, now }: { session: Session; now: number }) {
   const plan = session.plan
+  const open = useUi((s) => s.openSession)
+  const name = useDisplayName(session)
   return (
-    <li className="border-t border-rule px-4 py-[9px]">
-      <div className="flex items-center gap-3">
-        <Avatar seed={session.name} size={28} className="flex-none" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium leading-5">{session.name}</p>
-          <p className="truncate text-[12px] leading-4 text-muted">
-            <Inline text={session.activity} />
-            {plan && ` · Step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`} · {projectName(session.cwd)}
-          </p>
+    <SessionMenu session={session}>
+      <li className="border-t border-rule px-4 py-[9px]">
+        {/* The name is the button; its ::after covers the row, so the whole row opens the drawer and the bar keeps its role. */}
+        <div className="relative -mx-2 flex items-center gap-3 rounded-tile px-2 has-[button:hover]:bg-hover">
+          <Avatar seed={session.name} size={28} className="flex-none" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-medium leading-5">
+              <button type="button" onClick={() => open(session.id)} className="text-left outline-none after:absolute after:inset-0 after:rounded-tile focus-visible:after:ring-2 focus-visible:after:ring-accent">
+                {name}
+              </button>
+              <Marks id={session.id} />
+            </p>
+            <p className="truncate text-[12px] leading-4 text-muted">
+              <Inline text={session.activity} />
+              {plan && ` · Step ${Math.min(plan.done + 1, plan.total)} of ${plan.total}`} · {projectName(session.cwd)}
+            </p>
+          </div>
+          <Progress session={session} name={name} now={now} />
+          <MoreButton session={session} className="-mr-2 flex-none" />
         </div>
-        <Progress session={session} now={now} />
-      </div>
-      {session.subagents.length > 0 && (
-        <ul className="ml-[13px] mt-1 flex flex-col gap-1 border-l border-rule pl-[27px]" aria-label={`${session.name} subagents`}>
-          {session.subagents.map((a) => (
-            <li key={a.id} className="flex items-center gap-2 text-[12px] leading-4">
-              <CornerDownRight size={12} strokeWidth={1.75} className="-ml-[19px] flex-none text-muted" aria-hidden />
-              <Avatar seed={a.agentType} size={16} className="flex-none" />
-              <span className="flex-none font-medium">{a.agentType}</span>
-              <span className="min-w-0 flex-1 truncate text-muted">{a.task}</span>
-              <span className="flex-none tabular-nums text-muted">{duration(now - a.startedAt)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </li>
+        {session.subagents.length > 0 && (
+          <ul className="ml-[13px] mt-1 flex flex-col gap-1 border-l border-rule pl-[27px]" aria-label={`${name} subagents`}>
+            {session.subagents.map((a) => (
+              <li key={a.id} className="flex items-center gap-2 text-[12px] leading-4">
+                <CornerDownRight size={12} strokeWidth={1.75} className="-ml-[19px] flex-none text-muted" aria-hidden />
+                <Avatar seed={a.agentType} size={16} className="flex-none" />
+                <span className="flex-none font-medium">{a.agentType}</span>
+                <span className="min-w-0 flex-1 truncate text-muted">{a.task}</span>
+                <span className="flex-none tabular-nums text-muted">{duration(now - a.startedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    </SessionMenu>
   )
 }
 
 export function RunningNow({ className }: { className?: string }) {
   const snapshot = useUi((s) => s.snapshot)
   const now = useUi((s) => s.now)
-  const sessions = running(snapshot)
+  const go = useUi((s) => s.go)
+  const meta = useUi((s) => s.sessionMeta)
+  // Archive never hides a running session from here (lib/sessionMeta shownIn): only the pinned float up.
+  const sessions = pinnedFirst(running(snapshot), meta)
   return (
     <Card aria-labelledby="running-now" className={className}>
       <CardHeader
@@ -86,11 +104,7 @@ export function RunningNow({ className }: { className?: string }) {
         count={sessions.length}
         countLabel="active"
         action={
-          <Hint label={PENDING_LABEL.M4}>
-            <Button variant="ghost" size="sm" {...pending('M4')}>
-              View all
-            </Button>
-          </Hint>
+          <CardAction onClick={() => go({ page: 'sessions', active: true })}>View all</CardAction>
         }
       />
       {sessions.length ? (
@@ -100,7 +114,7 @@ export function RunningNow({ className }: { className?: string }) {
           ))}
         </ul>
       ) : (
-        <p className="border-t border-rule px-4 py-6 text-[13px] text-muted">No agent is running.</p>
+        <EmptyState icon={Activity}>No agent is running.</EmptyState>
       )}
     </Card>
   )

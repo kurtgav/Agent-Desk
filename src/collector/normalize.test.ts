@@ -91,11 +91,12 @@ describe('normalizeHook', () => {
 })
 
 describe('activityText (EVENT_SCHEMA § Activity text)', () => {
-  const cwd = 'D:\\proj'
+  // The host's own paths: a Windows drive path is not absolute on macOS, nor a POSIX one on Windows.
+  const [cwd, caseOther, outside] = process.platform === 'win32' ? ['D:\\proj', 'D:\\Proj', 'C:\\other\\a.md'] : ['/Users/me/proj', '/Users/me/Proj', '/tmp/other/a.md']
   it.each([
-    ['Edit', { file_path: 'D:\\Proj\\src\\app.tsx' }, 'Editing `src\\app.tsx`'],
-    ['Write', { file_path: 'C:\\other\\a.md' }, 'Editing `C:\\other\\a.md`'],
-    ['Read', { file_path: 'D:\\proj\\README.md' }, 'Reading `README.md`'],
+    ['Edit', { file_path: join(caseOther, 'src', 'app.tsx') }, `Editing \`${join('src', 'app.tsx')}\``],
+    ['Write', { file_path: outside }, `Editing \`${outside}\``],
+    ['Read', { file_path: join(cwd, 'README.md') }, 'Reading `README.md`'],
     ['Bash', { command: 'npm   test' }, 'Running `npm test`'],
     ['PowerShell', { command: 'echo `x`' }, "Running `echo 'x'`"],
     ['Bash', { command: 'x'.repeat(80) }, `Running \`${'x'.repeat(60)}…\``],

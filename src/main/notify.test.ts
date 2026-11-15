@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AttentionItem } from '@shared/snapshot'
-import { badgeCount, badgeIcon, inQuietHours, newItems, notifyPrefs, shouldToast, toastText, tomorrowMorning, trayIcon, trayTooltip } from './notify'
+import {
+  badgeCount, badgeIcon, dockBadge, inQuietHours, newItems, notifyPrefs, shouldToast, showAndWait, TEST_TOAST, TEST_TOAST_WAIT_MS, testToastResult, toastOptions, toastText,
+  tomorrowMorning, trayIcon, trayImage, trayTooltip, type Showable
+} from './notify'
 
 const item = (o: Partial<AttentionItem> = {}): AttentionItem => ({
   id: 'i1', priority: 1, kind: 'approval', sessionId: 's1', title: 'Run `npm test`', toolName: 'Bash', hint: null,
@@ -97,5 +101,103 @@ describe('toast text and pause', () => {
   it('"until tomorrow" is 08:00 on the next day', () => {
     const t = new Date(tomorrowMorning(new Date(2026, 10, 5, 23, 30).getTime()))
     expect([t.getDate(), t.getHours(), t.getMinutes()]).toEqual([6, 8, 0])
+  })
+})
+
+describe('toast builder', () => {
+  const icon = { bot: true } as unknown as Parameters<typeof toastOptions>[1]
+
+  it('carries the bot image, the text, a sound, and nothing to click but the toast itself', () => {
+    const o = toastOptions({ title: 'Needs approval · web-app', body: 'Run npm test' }, icon)
+    expect(o).toEqual({ title: 'Needs approval · web-app', body: 'Run npm test', icon, silent: false })
+    expect(o.icon).toBe(icon)
+    expect(o).not.toHaveProperty('actions') // an approval needs a click in the window (ADR-0006)
+    expect(o).not.toHaveProperty('toastXml')
+  })
+
+  it('shows redacted item text as one short plain line, title and body alike', () => {
+    const s = { name: 'web-app' } as Parameters<typeof toastText>[1]
+    const o = toastOptions(toastText(item({ title: 'Run `curl -H "Authorization: [redacted]"`\n‮' }), s), icon)
+    expect(o.title).toBe('Needs approval · web-app')
+    expect(o.body).toBe('Run curl -H "Authorization: [redacted]"')
+    const long = toastOptions({ title: 'T'.repeat(300), body: 'x'.repeat(500) }, icon)
+    expect([long.title, long.body].map((t) => t?.length)).toEqual([120, 120])
+    expect(long.body?.endsWith('…')).toBe(true)
+  })
+
+  it('has fixed test text that names what to do', () => {
+    expect(TEST_TOAST).toEqual({ title: 'AgentDeck can reach you here', body: 'This is what a notification looks like. Click it to open AgentDeck.' })
+  })
+})
+
+describe('test notification result', () => {
+  it('is ok only when Windows said it showed the toast', () => {
+    expect(testToastResult({ kind: 'show' })).toEqual({ ok: true })
+  })
+
+  it('says why in plain words otherwise, and where to look', () => {
+    const where = 'Windows Settings > System > Notifications'
+    for (const e of [{ kind: 'unsupported' }, { kind: 'failed', error: '' }, { kind: 'timeout' }] as const) {
+      const r = testToastResult(e, 'win32')
+      expect(r.ok).toBe(false)
+      expect(r.ok ? '' : r.error).toContain(where)
+    }
+    expect(testToastResult({ kind: 'timeout' }, 'win32')).toMatchObject({ error: expect.stringContaining('Focus assist or Do not disturb') })
+    expect(testToastResult({ kind: 'failed', error: 'E_FAIL\n0x80070005' }, 'win32')).toMatchObject({ error: expect.stringContaining('(E_FAIL 0x80070005)') })
+  })
+
+  it("on macOS points at macOS's own settings and Focus, not Windows'", () => {
+    const r = testToastResult({ kind: 'timeout' }, 'darwin')
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('System Settings > Notifications') })
+    expect(r).toMatchObject({ error: expect.stringContaining('Focus') })
+    expect(r.ok ? '' : r.error).not.toMatch(/Windows/)
+    expect(testToastResult({ kind: 'show' }, 'darwin')).toEqual({ ok: true })
+  })
+})
+
+describe('macOS Dock and menu bar', () => {
+  it('the Dock badge is the same count the taskbar badge shows, capped at 9+, and empty at zero', () => {
+    expect([0, -1, 1, 9, 10, 250].map(dockBadge)).toEqual(['', '', '1', '9', '9+', '9+'])
+  })
+
+  it('the plain menu bar icon is the template image macOS tints; status icons keep their colour', () => {
+    expect(trayImage('tray', 'darwin')).toBe('trayTemplate')
+    expect(trayImage('tray-attention', 'darwin')).toBe('tray-attention')
+    expect(trayImage('tray', 'win32')).toBe('tray')
+  })
+})
+
+describe('showAndWait', () => {
+  afterEach(() => vi.useRealTimers())
+  const toast = (onShow: (n: EventEmitter) => void): Showable => {
+    const n = new EventEmitter()
+    return Object.assign(n, { show: () => onShow(n) })
+  }
+
+  it('resolves on the show event', async () => {
+    await expect(showAndWait(toast((n) => n.emit('show', {})), 50)).resolves.toEqual({ kind: 'show' })
+  })
+
+  it('resolves on the failed event with the reason Windows gave', async () => {
+    await expect(showAndWait(toast((n) => n.emit('failed', {}, 'denied')), 50)).resolves.toEqual({ kind: 'failed', error: 'denied' })
+  })
+
+  it('resolves failed when show itself throws', async () => {
+    const t = toast(() => {
+      throw new Error('no toast')
+    })
+    await expect(showAndWait(t, 50)).resolves.toEqual({ kind: 'failed', error: 'no toast' })
+  })
+
+  it('gives up after the wait when Windows says nothing', async () => {
+    vi.useFakeTimers()
+    const result = showAndWait(toast(() => undefined), TEST_TOAST_WAIT_MS)
+    await vi.advanceTimersByTimeAsync(TEST_TOAST_WAIT_MS - 1)
+    let settled = false
+    void result.then(() => (settled = true))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(result).resolves.toEqual({ kind: 'timeout' })
   })
 })

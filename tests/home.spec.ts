@@ -10,12 +10,14 @@ const EVIDENCE = 'docs/evidence'
 
 let app: ElectronApplication | undefined
 let userData = ''
+/** The open window's console errors and page errors; printed when a test fails, so CI shows what broke. */
+let pageErrors: string[] = []
 
 /** Strip CLAUDE* so a dev run inside Claude Code can't leak into the app (F8); never poll the real machine (D-048). */
 function appEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData, CODEX_HOME: `${userData}/codex` }
 }
 
 /** These tests check the reference design against the fixed demo data (ADR-0011), so demo mode is seeded. */
@@ -25,6 +27,7 @@ async function open(width: number, height: number): Promise<{ page: Page; errors
   app = await electron.launch({ args: [MAIN], env: appEnv() })
   const page = await app.firstWindow()
   const errors: string[] = []
+  pageErrors = errors
   page.on('console', (m) => {
     if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`)
   })
@@ -44,6 +47,8 @@ async function open(width: number, height: number): Promise<{ page: Page; errors
 }
 
 test.afterEach(async () => {
+  const info = test.info()
+  if (info.status !== info.expectedStatus && pageErrors.length) console.error(`page errors in "${info.title}":\n${pageErrors.join('\n')}`)
   await app?.close().catch(() => undefined)
   app = undefined
   rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
@@ -97,54 +102,111 @@ test('risky held approval asks first, then answers locally in demo', async () =>
   expect(errors).toEqual([])
 })
 
-/** Everything a click could change: what's open, where we are, and the Home data on screen. */
-async function observable(page: Page) {
-  return {
-    url: page.url(),
-    layers: await page.locator('[role=dialog], [role=menu], [data-radix-popper-content-wrapper] [role=dialog]').count(),
-    needs: await page.getByRole('region', { name: 'Needs you' }).innerText(),
-    announcement: await page.locator('p[role=status]').innerText()
-  }
+test('a Running now row opens the session drawer; demo actions run nothing; Esc closes it', async () => {
+  const { page, errors } = await open(1440, 924)
+  const running = page.getByRole('region', { name: 'Running now' })
+  const first = running.getByRole('listitem').first().getByRole('button').first()
+  const name = (await first.innerText()).trim()
+  await first.click()
+
+  const drawer = page.getByRole('dialog', { name })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole('tab', { name: 'Timeline' })).toHaveAttribute('aria-selected', 'true')
+  await expect(drawer.getByRole('tabpanel')).toContainText('You sent a prompt')
+  await drawer.getByRole('tab', { name: 'Plan' }).click()
+  await expect(drawer.getByRole('tabpanel')).toBeVisible()
+
+  await drawer.getByRole('button', { name: 'Copy resume command' }).click()
+  await expect(page.getByTestId('notice')).toHaveText('Demo data: nothing was run.')
+
+  await page.keyboard.press('Escape')
+  await expect(drawer).toHaveCount(0)
+  // Focus goes back to the row that opened it, not to the top of the page.
+  await expect(first).toBeFocused()
+  expect(errors).toEqual([])
+})
+
+test('composer: Shift+Enter adds a line, @ brings an agent in as a chip, Run in the background sends nothing in demo', async () => {
+  const { page, errors } = await open(1440, 924)
+  const box = page.locator('#composer-input')
+  const send = page.getByRole('button', { name: 'Start conversation' })
+  await expect(send).toHaveAttribute('aria-disabled', 'true')
+  await box.fill('Fix the flaky login test')
+  await expect(send).toHaveAttribute('aria-disabled', 'false')
+  await box.press('Shift+Enter')
+  await box.pressSequentially('and the retry')
+  await expect(box).toHaveValue('Fix the flaky login test\nand the retry')
+
+  // An agent installed in Claude Code can lead a background session: @ writes it into the text, and a chip mirrors it.
+  await box.press('Control+Home')
+  await box.pressSequentially('@code-rev')
+  await expect(page.getByRole('listbox', { name: 'Agents' })).toBeVisible()
+  await box.press('Enter')
+  await expect(box).toHaveValue(/^@code-reviewer Fix the flaky login test\nand the retry$/)
+  await expect(page.getByRole('group', { name: 'Agents in this message' })).toContainText('code-reviewer')
+  await expect(box).toBeFocused()
+
+  await page.getByRole('button', { name: 'Run in the background' }).click()
+  await expect(page.getByTestId('notice')).toHaveText('Demo data: nothing was dispatched.')
+  await expect(box).toHaveValue(/@code-reviewer/)
+  expect(errors).toEqual([])
+})
+
+/** D-033 is retired: no control may promise a later milestone, so every page and menu is checked for what used to mark one. */
+async function expectNoPending(page: Page): Promise<void> {
+  await expect(page.locator('[data-pending]')).toHaveCount(0)
+  await expect(page.getByText(/Arrives with/)).toHaveCount(0)
 }
 
-test('later-milestone controls are inert and say when they arrive', async () => {
+test('no control promises a later milestone, and the working ones work', async () => {
   const { page, errors } = await open(1440, 924)
-  const before = await observable(page)
+  await expectNoPending(page)
 
-  // Every pending control on Home, activated by mouse and by keyboard, changes nothing.
-  const controls = await page.locator('[data-pending]').all()
-  expect(controls.length).toBeGreaterThan(10)
-  for (const el of controls) {
-    await expect(el).toHaveAttribute('aria-disabled', 'true')
-    await el.click({ force: true }) // aria-disabled, so Playwright would refuse a normal click
-    await el.focus()
-    await page.keyboard.press('Enter')
-    expect(await observable(page)).toEqual(before)
+  const main = page.getByRole('navigation', { name: 'Main' })
+  for (const name of ['Tasks', 'Sessions', 'Approvals', 'Files', 'Activity', 'Daily report', 'Home']) {
+    // Approvals carries its open count in its name ("Approvals 2 open").
+    const item = main.getByRole('button', { name: new RegExp(`^${name}( [0-9]+ open)?$`) })
+    await item.click()
+    await expect(item).toHaveAttribute('aria-current', 'page')
+    await expectNoPending(page)
   }
+  await page.getByRole('button', { name: /^Roles/ }).click()
+  await expectNoPending(page)
 
-  // Keyboard focus shows the explanation too (the loop above leaves focus on another control).
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: /Search sessions/ }).focus()
-  await expect(page.getByRole('tooltip')).toHaveText('Search: Arrives with lists and actions (M4)')
+  // The gear and the user block both open Settings, which has every section.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  for (const title of ['Profile', 'Daily report', 'Notifications', 'Startup', 'Integration', 'Diagnostics']) {
+    await expect(page.getByRole('heading', { level: 2, name: title, exact: true })).toBeVisible()
+  }
+  await expectNoPending(page)
+  await main.getByRole('button', { name: 'Home' }).click()
+  await page.getByRole('button', { name: /Your profile$/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
 
-  // Pending menu rows are reachable by keyboard, explain themselves, and keep the menu as it was.
+  // ⋯ › Diagnostics and ⋯ › Settings are ordinary menu items now; the switcher's Diagnostics too.
   await page.getByRole('button', { name: 'More', exact: true }).click()
-  const item = page.getByRole('menuitem', { name: /Diagnostics/ })
-  await expect(item).toHaveAttribute('data-pending', 'M5')
-  await expect(item).toContainText('Arrives with settings and diagnostics (M5)')
-  await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('Enter')
-  await expect(page.getByRole('menu')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menuitem', { name: 'Settings' })).not.toHaveAttribute('aria-disabled', 'true')
+  await page.getByRole('menuitem', { name: 'Diagnostics' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Diagnostics' })).toBeInViewport()
+  await page.getByRole('button', { name: 'Third Code workspace menu' }).click()
+  await page.getByRole('menuitem', { name: 'Diagnostics' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Diagnostics' })).toBeInViewport()
+
+  await expect(page.getByRole('button', { name: 'Enable usage' })).toHaveCount(0)
+  await expectNoPending(page)
 
   // Working controls in M1: New task focuses the composer, effort cycles, sidebar toggles keep focus.
+  await main.getByRole('button', { name: 'Home' }).click()
   await page.getByRole('banner').getByRole('button', { name: 'New task' }).click()
   await expect(page.locator('#composer-input')).toBeFocused()
   await page.getByRole('button', { name: /^Effort: High/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Extra high' }).click()
   await expect(page.getByRole('button', { name: 'Effort: Extra high. Change effort' })).toBeVisible()
   await page.getByRole('button', { name: 'Collapse sidebar' }).focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible() // collapsed, the gear stays
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeFocused()
   expect(errors).toEqual([])
@@ -155,6 +217,104 @@ test('Home has no axe violations (WCAG 2.x A/AA)', async () => {
   // Legacy mode: the default mode opens a helper page, which Electron's CDP target doesn't support.
   const results = await new AxeBuilder({ page }).setLegacyMode(true).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([])
+  expect(errors).toEqual([])
+})
+
+const axe = async (page: Page): Promise<string[]> =>
+  (await new AxeBuilder({ page }).setLegacyMode(true).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()).violations.map(
+    (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`
+  )
+
+test('the sidebar opens every list page, each passes axe, and the breadcrumb and g-keys find the way back', async () => {
+  const { page, errors } = await open(1440, 924)
+  const nav = page.getByRole('navigation', { name: 'Main' })
+  const title = page.getByRole('heading', { level: 1 })
+  const crumb = page.getByRole('navigation', { name: 'Breadcrumb' })
+
+  await nav.getByRole('button', { name: 'Sessions' }).click()
+  await expect(title).toHaveText('Sessions')
+  await expect(crumb.locator('[aria-current=page]')).toHaveText('Sessions')
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(8)
+  await page.getByRole('group', { name: 'Status' }).getByRole('button', { name: 'Failed' }).click()
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(1)
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: /^Approvals/ }).click()
+  await expect(page.getByRole('region', { name: 'Waiting for your OK' }).getByRole('listitem')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Audit log' })).toContainText('Approved once')
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Files' }).click()
+  await expect(title).toHaveText('Files')
+  expect(await page.locator('main section').count()).toBeGreaterThan(1) // one card per project
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Activity' }).click()
+  await expect(page.getByRole('region', { name: 'Events' }).getByRole('listitem').first()).toBeVisible()
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Tasks' }).click()
+  await expect(title).toHaveText('Tasks')
+  await expect(page.getByRole('region', { name: 'In progress' }).getByRole('listitem')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Waiting on you' }).getByRole('listitem')).toHaveCount(4)
+  expect(await axe(page)).toEqual([])
+
+  await nav.getByRole('button', { name: 'Daily report' }).click()
+  await expect(title).toHaveText('Daily report')
+  await expect(page.getByRole('navigation', { name: 'Report days' }).getByRole('button')).toHaveCount(6)
+  expect(await axe(page)).toEqual([])
+
+  await page.getByRole('button', { name: /^Roles/ }).click()
+  await expect(title).toHaveText('Roles')
+  await expect(page.getByRole('region', { name: 'Leadership' })).toBeVisible()
+  expect(await axe(page)).toEqual([])
+
+  await crumb.getByRole('button', { name: 'Home' }).click()
+  await expect(title).toHaveText(/^Good (morning|afternoon|evening), Kurt$/)
+  await page.locator('body').press('g')
+  await page.locator('body').press('a')
+  await expect(title).toHaveText('Approvals')
+  await page.locator('body').press('g')
+  await page.locator('body').press('h')
+  await expect(title).toHaveText(/^Good/)
+  expect(errors).toEqual([])
+})
+
+test('avatar stack and View all open active sessions; Ctrl+K finds a session and opens its drawer', async () => {
+  const { page, errors } = await open(1440, 924)
+  const pressed = page.getByRole('group', { name: 'Status' }).locator('[aria-pressed=true]')
+
+  await page.getByRole('banner').getByRole('button', { name: /active sessions$/ }).click()
+  await expect(pressed).toHaveText('Active')
+  await expect(page.getByRole('region', { name: 'Sessions' }).getByRole('listitem')).toHaveCount(5)
+
+  await page.keyboard.press('Control+K')
+  const palette = page.getByRole('dialog', { name: 'Search AgentDeck' })
+  await expect(palette).toBeVisible()
+  expect(await axe(page)).toEqual([])
+  await palette.getByRole('combobox').fill('stripe')
+  await expect(palette.getByRole('option', { selected: true })).toContainText('stripe-webhooks')
+  await page.keyboard.press('Enter')
+  await expect(palette).toBeHidden()
+  await expect(page.getByRole('dialog', { name: /stripe-webhooks/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // Closed with Ctrl+K it forgets what was typed; either way, focus goes back to what opened it.
+  const searchButton = page.getByRole('button', { name: 'Search', exact: true })
+  await searchButton.click()
+  await page.getByRole('combobox').fill('stripe')
+  await page.keyboard.press('Control+K')
+  await expect(palette).toBeHidden()
+  await expect(searchButton).toBeFocused()
+  await page.keyboard.press('Control+K')
+  await expect(page.getByRole('combobox')).toHaveValue('')
+  await page.keyboard.press('Escape')
+  await expect(searchButton).toBeFocused()
+
+  await page.keyboard.press('Control+K')
+  await page.getByRole('combobox').fill('new task')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#composer-input')).toBeFocused()
   expect(errors).toEqual([])
 })
 

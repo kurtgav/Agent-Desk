@@ -1,7 +1,8 @@
-// ADR-0005 § 4: the only code that writes Claude Code's settings.json. No electron import: unit-testable.
+// ADR-0005 § 4: the only code that writes Claude Code's settings.json (and Codex CLI's hooks.json, ADR-0014). No electron
+// import: unit-testable.
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { foreignUnchanged, type Plan } from './hooks-install'
+import { basename, dirname, join } from 'node:path'
+import { CLAUDE, foreignUnchanged, type HookFile, type Plan } from './hooks-install'
 
 export type WriteResult = { ok: true; backup: string | null } | { ok: false; error: string }
 
@@ -9,7 +10,8 @@ const ATTEMPTS = 3
 const RENAME_RETRIES = 3
 const RENAME_WAIT_MS = 50
 const BACKUPS_KEPT = 20
-const BACKUP_NAME = /^settings-\d{8}-\d{6}-\d{3}\.json$/
+/** Per file, so one file's 20 never evict the other's. `prefix` is a constant (HookSpec.backup), never user text. */
+const backupName = (prefix: string): RegExp => new RegExp(`^${prefix}-\\d{8}-\\d{6}-\\d{3}\\.json$`)
 
 const code = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code
 
@@ -28,7 +30,7 @@ export function readText(path: string): string | null {
   try {
     return UTF8.decode(bytes)
   } catch {
-    throw new Error('settings.json is not UTF-8 text')
+    throw new Error(`${basename(path)} is not UTF-8 text`)
   }
 }
 
@@ -47,16 +49,17 @@ function resolveLink(path: string): string {
 const stamp = (d: Date): string =>
   d.toISOString().replace(/[-:]/g, '').replace('T', '-').replace('.', '-').slice(0, 19)
 
-function saveBackup(text: string, dir: string, at: Date): string {
+function saveBackup(text: string, dir: string, at: Date, prefix: string): string {
   mkdirSync(dir, { recursive: true })
-  const backups = (): string[] => readdirSync(dir).filter((f) => BACKUP_NAME.test(f)).sort()
+  const pattern = backupName(prefix)
+  const backups = (): string[] => readdirSync(dir).filter((f) => pattern.test(f)).sort()
   // Launch and quit alternate between the same two texts: an identical copy moves to the newest slot instead of
   // piling up, so the 20 kept reach back past the last real edit.
   const same = backups().find((f) => readText(join(dir, f)) === text)
   // A free name, so two writes in one millisecond never overwrite each other's backup.
   let t = at.getTime()
-  let name = `settings-${stamp(new Date(t))}.json`
-  while (name !== same && existsSync(join(dir, name))) name = `settings-${stamp(new Date(++t))}.json`
+  let name = `${prefix}-${stamp(new Date(t))}.json`
+  while (name !== same && existsSync(join(dir, name))) name = `${prefix}-${stamp(new Date(++t))}.json`
   const file = join(dir, name)
   if (same) renameSync(join(dir, same), file)
   else writeFileSync(file, text)
@@ -76,13 +79,13 @@ function renameWithRetry(from: string, to: string): void {
   }
 }
 
-function tryWrite(path: string, tmp: string, makePlan: (text: string | null) => Plan, backupsDir: string, now: () => Date): WriteResult {
+function tryWrite(path: string, tmp: string, makePlan: (text: string | null) => Plan, backupsDir: string, now: () => Date, spec: HookFile): WriteResult {
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const text = readText(path)
     const plan = makePlan(text)
     if (!plan.ok) return plan
     if (!plan.changed) return { ok: true, backup: null }
-    const backup = text === null ? null : saveBackup(text, backupsDir, now())
+    const backup = text === null ? null : saveBackup(text, backupsDir, now(), spec.backup)
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(tmp, plan.after)
     // Someone (Claude Code, the user's editor) wrote since we read: plan again from their version.
@@ -93,17 +96,17 @@ function tryWrite(path: string, tmp: string, makePlan: (text: string | null) => 
     renameWithRetry(tmp, path)
     const written = readText(path)
     // Someone wrote right after us: their version wins, and the next status check shows where that leaves us.
-    if (written !== plan.after) return { ok: false, error: 'settings.json changed while AgentDeck was writing it, so AgentDeck left it as it is' }
-    if (foreignUnchanged(text, written)) return { ok: true, backup }
+    if (written !== plan.after) return { ok: false, error: `${spec.file} changed while AgentDeck was writing it, so AgentDeck left it as it is` }
+    if (foreignUnchanged(text, written, spec)) return { ok: true, backup }
     // Our own edit touched something else: put the original back, atomically too.
     if (text === null) rmSync(path, { force: true })
     else {
       writeFileSync(tmp, text)
       renameWithRetry(tmp, path)
     }
-    return { ok: false, error: 'settings.json did not validate after writing; the original was restored' }
+    return { ok: false, error: `${spec.file} did not validate after writing; the original was restored` }
   }
-  return { ok: false, error: 'settings.json kept changing' }
+  return { ok: false, error: `${spec.file} kept changing` }
 }
 
 /**
@@ -114,13 +117,14 @@ export function writeSettings(
   path: string,
   makePlan: (text: string | null) => Plan,
   backupsDir: string,
-  now: () => Date = () => new Date()
+  now: () => Date = () => new Date(),
+  spec: HookFile = CLAUDE
 ): WriteResult {
   let tmp = `${path}.agentdeck.tmp`
   try {
     const file = resolveLink(path)
     tmp = `${file}.agentdeck.tmp` // beside the real file, so the rename stays on one volume
-    return tryWrite(file, tmp, makePlan, backupsDir, now)
+    return tryWrite(file, tmp, makePlan, backupsDir, now, spec)
   } catch (e) {
     try {
       rmSync(tmp, { force: true })

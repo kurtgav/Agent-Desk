@@ -68,6 +68,7 @@ export function recentSessions(s: Snapshot, max: number): Session[] {
 export function recentProjects(s: Snapshot, max: number): { cwd: string; name: string }[] {
   const seen = new Map<string, string>()
   for (const x of recentSessions(s, s.sessions.length)) {
+    if (!x.cwd) continue // no folder, nothing to run a task in
     const key = pathKey(x.cwd)
     if (!seen.has(key)) seen.set(key, x.cwd)
   }

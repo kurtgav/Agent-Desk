@@ -12,12 +12,15 @@ function RoundRect([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
   $p.CloseFigure(); return $p
 }
 
-function Mark([int]$size, [string]$file, [string]$dot) {
+# $pad leaves a transparent margin on every side (the macOS app icon keeps its tile inside the system's icon grid).
+function Mark([int]$size, [string]$file, [string]$dot, [int]$pad = 0) {
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = 'AntiAlias'; $g.Clear([System.Drawing.Color]::Transparent)
-  $u = $size / 16.0
-  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 10, 132, 255))), (RoundRect 0 0 $size $size (4.5 * $u)))
+  $g.TranslateTransform($pad, $pad)
+  $inner = $size - 2 * $pad
+  $u = $inner / 16.0
+  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 10, 132, 255))), (RoundRect 0 0 $inner $inner (4.5 * $u)))
   $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, 255, 255, 255))), (RoundRect (5.5 * $u) (3 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
   $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)), (RoundRect (3 * $u) (6.5 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
   if ($dot) {
@@ -32,6 +35,21 @@ function Mark([int]$size, [string]$file, [string]$dot) {
     $g.CompositingMode = 'SourceOver'
     $g.FillEllipse((New-Object System.Drawing.SolidBrush $c), (9.75 * $u), (9.75 * $u), (5.5 * $u), (5.5 * $u))
   }
+  $bmp.Save((Join-Path $out $file), [System.Drawing.Imaging.ImageFormat]::Png)
+  $g.Dispose(); $bmp.Dispose()
+}
+
+# macOS menu bar: a template image (black and alpha only, the name ends in Template) that the menu bar tints for light and
+# dark. The cards are cut out of the tile; the back one only partly. The coloured status icons above stay as they are.
+function TemplateMark([int]$size, [string]$file) {
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode = 'AntiAlias'; $g.Clear([System.Drawing.Color]::Transparent)
+  $u = $size / 16.0
+  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Black)), (RoundRect 0 0 $size $size (4.5 * $u)))
+  $g.CompositingMode = 'SourceCopy'
+  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(110, 0, 0, 0))), (RoundRect (5.5 * $u) (3 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
+  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Transparent)), (RoundRect (3 * $u) (6.5 * $u) (7.5 * $u) (6.5 * $u) (1.6 * $u)))
   $bmp.Save((Join-Path $out $file), [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
 }
@@ -52,10 +70,14 @@ function Badge([int]$size, [string]$file, [string]$text) {
 }
 
 Mark 256 'icon.png' $null
+# The macOS app icon: electron-builder needs at least 512x512, and the tile sits in the middle 824 of 1024 like Apple's own.
+Mark 1024 '..\build\icon-mac.png' $null 100
 foreach ($v in @(@{ n = 'tray'; d = $null }, @{ n = 'tray-attention'; d = 'attention' }, @{ n = 'tray-failed'; d = 'failed' }, @{ n = 'tray-paused'; d = 'paused' })) {
   Mark 16 "$($v.n).png" $v.d
   Mark 32 "$($v.n)@2x.png" $v.d
 }
+TemplateMark 16 'trayTemplate.png'
+TemplateMark 32 'trayTemplate@2x.png'
 foreach ($n in @('1', '2', '3', '4', '5', '6', '7', '8', '9', '9+')) {
   $name = "badge-$($n.Replace('+', 'plus'))"
   Badge 16 "$name.png" $n

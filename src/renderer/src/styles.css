@@ -2,54 +2,95 @@
 
 /*
  * Tokens tuned against docs/reference/dashboard.png (UI_MAP § Layout tokens, D-032).
- * Light theme now; the dark block is ready but not switchable until Settings (M5).
+ * Two themes on one set of names: `:root` is light, `:root[data-theme='dark']` redefines what differs. The page sets data-theme to
+ * the resolved theme (lib/theme.ts, public/theme-boot.js). Every text and surface pair is checked for WCAG AA by theme.test.ts.
+ *
+ * Surfaces climb from the ground: ground › surface (cards, bars) › overlay (menus, dialogs) › well / tile (insets on a card)
+ * › hover › active › lift (the chosen segment). Light climbs by getting whiter, dark by getting lighter; the names stay put.
  */
 :root {
+  color-scheme: light;
   --ground: #f6f6f6;
   --surface: #ffffff;
+  --overlay: #ffffff;
   --tile: #f6f6f6;
   --active: #ebebed;
+  --hover: #f6f6f6;
   --well: #f2f2f3;
+  --lift: #ffffff;
   --border: #eaeaea;
   --rule: #f1f1f2;
   --control: #dcdcdf;
   --ink: #18181b;
-  --muted: #6b6b72;
+  /* Tooltips and the notice: a dark chip on light, a raised chip on dark, so neither theme gets a bright slab. */
+  --tip: #18181b;
+  --on-tip: #ffffff;
+  --failed-solid: #991b1b;
+  /* 4.9:1 on the pressed/active fill, the dimmest surface muted text sits on (#6b6b72 was 4.4:1 there). */
+  --muted: #64646b;
   --accent: #0a84ff;
   /* Filled controls: white text on #0A84FF is 3.6:1, so fills use a deeper blue (4.7:1). */
   --accent-fill: #0071e3;
   --accent-fill-hover: #0064c8;
   --track: #ebebeb;
   --focus: #0a84ff;
+  --selection: color-mix(in oklab, #0a84ff 24%, transparent);
+  --scrim: rgb(0 0 0 / 0.2);
+  --scrim-soft: rgb(0 0 0 / 0.1);
 
   --working: #0a84ff;  --working-bg: #e6f0fe;  --working-ink: #0b4fa8;
   --needs: #f59e0b;    --needs-bg: #fef3c7;    --needs-ink: #92400e;
   --failed: #ef4444;   --failed-bg: #fee2e2;   --failed-ink: #991b1b;
   --idle: #a1a1aa;     --idle-bg: #efeff1;     --idle-ink: #52525b;
   --done: #22c55e;     --done-bg: #dcfce7;     --done-ink: #166534;
+
+  /* Shadows belong to what floats. Layered and transparent. */
+  --elev-pop: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 8px -2px rgb(0 0 0 / 0.06), 0 12px 24px -6px rgb(0 0 0 / 0.1);
+  --elev-modal: 0 2px 4px rgb(0 0 0 / 0.04), 0 8px 16px -4px rgb(0 0 0 / 0.08), 0 24px 56px -8px rgb(0 0 0 / 0.18);
+  --elev-lift: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
+/*
+ * Dark: a cool-neutral grey ladder (no pure black ground, no pure white ink), the brand blue kept and lifted a little so it
+ * reads on a dark card, and each status tint turned into a deep wash with a pale ink. Shadows are heavier because they have
+ * to show on a dark ground; overlays also sit one step lighter than the card they cover.
+ */
 :root[data-theme='dark'] {
-  --ground: #0f0f10;
-  --surface: #18181b;
-  --tile: #202023;
-  --active: #27272a;
-  --well: #202023;
-  --border: #2a2a2e;
-  --rule: #232326;
-  --control: #3f3f46;
-  --ink: #fafafa;
-  --muted: #a1a1aa;
+  color-scheme: dark;
+  --ground: #0e0e10;
+  --surface: #17171a;
+  --overlay: #1e1e22;
+  --tile: #212126;
+  --active: #303037;
+  --hover: #2a2a30;
+  --well: #26262c;
+  --lift: #3a3a42;
+  --border: #2a2a30;
+  --rule: #222227;
+  --control: #3c3c44;
+  --ink: #ececef;
+  --tip: #3a3a42;
+  --on-tip: #ececef;
+  --failed-solid: #a11a1a;
+  --muted: #a8a8b1;
   --accent: #3b9bff;
-  --accent-fill: #0a84ff;
-  --accent-fill-hover: #3b9bff;
-  --track: #2a2a2e;
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0064c8;
+  --track: #303037;
   --focus: #3b9bff;
-  --working-bg: #0b2a4a;  --working-ink: #9cc9ff;
-  --needs-bg: #3a2a07;    --needs-ink: #fcd34d;
-  --failed-bg: #3b1414;   --failed-ink: #fca5a5;
-  --idle-bg: #27272a;     --idle-ink: #d4d4d8;
-  --done-bg: #0f2e1a;     --done-ink: #86efac;
+  --selection: color-mix(in oklab, #3b9bff 36%, transparent);
+  --scrim: rgb(0 0 0 / 0.55);
+  --scrim-soft: rgb(0 0 0 / 0.35);
+
+  --working: #3b9bff;  --working-bg: #11294a;  --working-ink: #a9d0ff;
+  --needs: #f59e0b;    --needs-bg: #3b2a09;    --needs-ink: #fcd34d;
+  --failed: #f06060;   --failed-bg: #411a1c;   --failed-ink: #fca5a5;
+  --idle: #8b8b94;     --idle-bg: #28282d;     --idle-ink: #c8c8d0;
+  --done: #34d27b;     --done-bg: #11331f;     --done-ink: #86efac;
+
+  --elev-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 12px -2px rgb(0 0 0 / 0.45), 0 16px 32px -8px rgb(0 0 0 / 0.5);
+  --elev-modal: 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 24px -4px rgb(0 0 0 / 0.5), 0 32px 72px -8px rgb(0 0 0 / 0.6);
+  --elev-lift: 0 1px 2px rgb(0 0 0 / 0.3);
 }
 
 @theme inline {
@@ -57,21 +98,92 @@
   --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
   --color-ground: var(--ground);
   --color-surface: var(--surface);
+  --color-overlay: var(--overlay);
   --color-tile: var(--tile);
   --color-active: var(--active);
+  --color-hover: var(--hover);
   --color-well: var(--well);
+  --color-lift: var(--lift);
   --color-line: var(--border);
   --color-rule: var(--rule);
   --color-control: var(--control);
   --color-ink: var(--ink);
+  --color-tip: var(--tip);
+  --color-on-tip: var(--on-tip);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-fill: var(--accent-fill);
   --color-accent-fill-hover: var(--accent-fill-hover);
   --color-track: var(--track);
+  --color-scrim: var(--scrim);
+  --color-scrim-soft: var(--scrim-soft);
+
+  /* One radius scale: card 16 › tile 12 › control 8 (rounded-lg: nav rows, menu rows, icon tiles) › tag 6 (rounded-md) › pill. */
   --radius-card: 16px;
   --radius-tile: 12px;
+
+  /* Shadows belong to what floats: menus and tooltips (pop), dialogs, the drawer, the palette and the notice (modal). */
+  --shadow-pop: var(--elev-pop);
+  --shadow-modal: var(--elev-modal);
+  --shadow-lift: var(--elev-lift);
+
+  /* Colour, opacity and scale move in 150 ms on one curve; nothing animates layout. */
+  --ease-ui: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
+
+/*
+ * Type roles (UI_MAP § Layout tokens). Size, leading, weight and tracking only: colour comes from text-ink / text-muted,
+ * so these never fight a colour class. A figure on its own (t-stat, counts, durations) is tabular; running text is not,
+ * because Inter's tabular set also widens hyphens ("harbor-dental-site").
+ */
+@utility t-display {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+@utility t-stat {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+@utility t-heading {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility t-title {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+@utility t-label {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+@utility t-meta {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Press: colour and scale ease in 150 ms; the scale is dropped for anyone who asked for less motion. */
+@utility press {
+  transition-property: background-color, border-color, color, opacity, scale;
+  transition-duration: var(--default-transition-duration);
+  transition-timing-function: var(--default-transition-timing-function);
+  @media (prefers-reduced-motion: no-preference) {
+    &:active:not(:disabled, [aria-disabled='true']) {
+      scale: 0.97;
+    }
+  }
+}
+
 
 @layer base {
   html,
@@ -87,11 +199,24 @@
     font-size: 14px;
     line-height: 20px;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     overflow: hidden;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p,
+  li {
+    text-wrap: pretty;
   }
   code {
     font-family: var(--font-mono);
     font-size: 0.92em;
+  }
+  ::selection {
+    background: var(--selection);
   }
   :focus-visible {
     outline: 2px solid var(--focus);
@@ -104,9 +229,15 @@
   button {
     cursor: pointer;
   }
+  button:disabled,
   [aria-disabled='true'] {
     cursor: default;
   }
+}
+
+/* A scrolling list whose first and last 12 px fade out: the lists keep 12 px of padding there, so nothing is hidden at rest. */
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 12px), transparent);
 }
 
 /* Window caption buttons (titleBarOverlay) sit over the top bar's right end. */
@@ -118,6 +249,13 @@
 }
 .caption-inset {
   padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px);
+}
+/* macOS: the traffic lights (window-options.ts TRAFFIC_LIGHTS, x 16 to 68) sit over the sidebar's top-left corner. */
+html[data-platform='darwin'] .traffic-inset {
+  padding-left: 76px;
+}
+html[data-platform='darwin'] .traffic-hide {
+  visibility: hidden;
 }
 
 @keyframes indeterminate {
@@ -131,6 +269,49 @@
 .bar-indeterminate {
   animation: indeterminate 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+/*
+ * What floats arrives, and never leaves with an animation (a closing animation would hold the element in the tree,
+ * and focus and Esc handling depend on it going at once). Menus, popovers and tooltips grow out of their trigger.
+ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+/* `transform`, not `translate`: the centred dialogs position themselves with Tailwind's `translate`, which must not be overridden. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+[data-radix-popper-content-wrapper] > :is([data-state='open'], [data-state='delayed-open'], [data-state='instant-open']) {
+  animation: pop-in 150ms var(--ease-ui);
+  transform-origin: var(--radix-popper-transform-origin);
+}
+@utility anim-fade {
+  animation: fade-in 150ms var(--ease-ui);
+}
+@utility anim-rise {
+  animation: rise-in 180ms var(--ease-ui);
+}
+@utility anim-slide {
+  animation: slide-in 200ms var(--ease-ui);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bar-indeterminate {
     animation: none;
@@ -140,5 +321,17 @@
   *::before,
   *::after {
     transition-duration: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
+}
+
+/*
+ * A theme change repaints everything in one frame: without this, the elements that ease colour would lag behind the ones that do
+ * not. What is marked data-keep-motion (the theme button's icons) still eases.
+ */
+:root.theme-switching *:not([data-keep-motion], [data-keep-motion] *),
+:root.theme-switching *:not([data-keep-motion], [data-keep-motion] *)::before,
+:root.theme-switching *:not([data-keep-motion], [data-keep-motion] *)::after {
+  transition: none !important;
 }

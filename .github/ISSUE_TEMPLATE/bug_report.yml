@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in AgentDeck does not work or shows the wrong thing.
+title: 'bug: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem (a way to reach AgentDeck from outside, or to make it approve something) does **not** belong here: use [private vulnerability reporting](https://github.com/kurtgav/Agent-Desk/security/advisories/new) instead.
+  - type: input
+    id: agentdeck-version
+    attributes:
+      label: AgentDeck version
+      description: Shown at the bottom left of the window, and in Settings, Diagnostics.
+      placeholder: '0.1.0'
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: Press Win+R, type `winver`. For example "Windows 11 24H2, build 26100".
+    validations:
+      required: true
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Run `claude --version` in a terminal.
+      placeholder: '2.1.318 (Claude Code)'
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where the Claude Code session runs
+      description: Pick the one the problem is about.
+      options:
+        - Terminal (CLI)
+        - Claude Desktop
+        - VS Code extension
+        - Background session (claude --bg)
+        - More than one of these
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw. A screenshot helps; remove anything private first.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a Claude Code session in ...
+        2. ...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Open **Settings, Diagnostics, Copy diagnostics** and paste the result. It holds versions, paths and the results of AgentDeck's self-checks, and no session content. It does include local folder paths, so read it and edit out anything you want to keep private.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: I removed tokens, passwords and private paths from everything I pasted.
+          required: true

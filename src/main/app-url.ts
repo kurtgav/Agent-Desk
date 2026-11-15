@@ -13,7 +13,9 @@ export function resolveInside(root: string, urlPath: string): string | null {
   } catch {
     return null
   }
-  if (decoded.includes('\0')) return null
+  // No app file has a NUL, a backslash or a colon in its name. On Windows those escape the root (`..\`, `C:`); on macOS
+  // they would only name a file that is not there, but the same refusal holds on both.
+  if (/[\0\\:]/.test(decoded)) return null
   const file = resolve(root, decoded.replace(/^[/\\]+/, ''))
   const rel = relative(root, file)
   if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null

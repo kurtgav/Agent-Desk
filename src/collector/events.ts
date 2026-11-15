@@ -14,6 +14,10 @@ export type EventKind =
   | 'notification'
   | 'turn.stopped'
   | 'turn.failed'
+  /** Esc on a running turn (Codex `Interrupt`): idle, not a finished turn. */
+  | 'turn.interrupted'
+  /** Who the session is, never what it does: name, folder, pid, model (Codex `SessionStart`). */
+  | 'session.meta'
   | 'subagent.started'
   | 'subagent.stopped'
   | 'task.created'

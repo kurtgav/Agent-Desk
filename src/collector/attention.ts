@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { ulid, type AgentEvent } from './events'
 import { code, displayPath } from './normalize'
 import { cap } from './redact'
-import type { SessionState } from './reduce'
+import { answersWait, type SessionState } from './reduce'
 
 /**
  * The attention engine (ADR-0013, STATE_MACHINE § 3): the only producer of "needs you" items. Pure:
@@ -57,7 +57,7 @@ export const DEFAULT_STALL: StallConfig = { idleMs: 5 * 60_000, toolMs: 10 * 60_
 export const FAST_POLL_MS = 2 * 60_000
 
 const UNTIL_PROMPT = Number.MAX_SAFE_INTEGER
-const TITLE_MAX = 1_000
+export const TITLE_MAX = 1_000
 const REVIEW_TITLE_MAX = 160
 
 export const emptyAttention = (): AttentionState => ({ open: [], quiet: {} })
@@ -236,8 +236,9 @@ export function attend(state: AttentionState, ev: AgentEvent, session: SessionSt
   if (ev.source === 'hook') {
     close(unstuck, 'hook')
     if (ev.kind !== 'notification') {
-      // Any later event of the same agent means its prompt was answered (S4); a Post of the same call says how.
-      close((i) => i.priority === 1 && i.source !== 'poll' && i.agentId === ev.agentId, 'hook')
+      // Any later event of the same agent means its prompt was answered (S4); a Post of the same call says how. A late
+      // Codex Pre of the call it asks about is no answer (reduce answersWait).
+      close((i) => i.priority === 1 && i.source !== 'poll' && i.agentId === ev.agentId && (ev.kind === 'permission.requested' || answersWait(sid, i.toolName, ev)), 'hook')
     }
     if (ev.toolUseId && (ev.kind === 'tool.finished' || ev.kind === 'tool.failed')) close((i) => i.toolUseId === ev.toolUseId, 'hook')
   }
@@ -369,6 +370,13 @@ export function dismiss(state: AttentionState, id: string, now: number, cfg: Sta
     opened: [],
     closed: [{ item, at: now, by: 'user-dismiss', state: 'dismissed' }]
   }
+}
+
+/** A held approval answered in AgentDeck (ADR-0006): it closes at once, resolved by 'agentdeck'. */
+export function answer(state: AttentionState, id: string, now: number): Attended {
+  const item = state.open.find((i) => i.id === id)
+  if (!item?.held) return { state, opened: [], closed: [] }
+  return { state: { ...state, open: state.open.filter((i) => i !== item) }, opened: [], closed: [{ item, at: now, by: 'agentdeck', state: 'resolved' }] }
 }
 
 /** The 1 s poll runs while a P1 item younger than 2 min is open; 0 = no fast poll. */

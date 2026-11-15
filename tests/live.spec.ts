@@ -16,7 +16,7 @@ let userData = ''
 function appEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v
-  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', CLAUDE_CONFIG_DIR: userData }
+  return { ...env, AGENTDECK_USER_DATA: userData, AGENTDECK_POLL: '0', AGENTDECK_THEME: 'light', CLAUDE_CONFIG_DIR: userData, CODEX_HOME: `${userData}/codex` }
 }
 
 interface Endpoint {
@@ -88,7 +88,7 @@ test('live Home starts empty and honest, then shows a started tool within 1 s', 
   await expect(page.getByRole('region', { name: 'Tasks finished' })).toContainText('0')
   await expect(page.getByRole('region', { name: 'Your agents' })).toContainText('No sessions this week.')
   await expect(page.getByRole('region', { name: 'Recent files' })).toContainText('No files changed this week.')
-  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('All agents')).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Roles', { exact: true })).toBeVisible()
 
   const session_id = 'e2e-latency'
   expect(await post(endpoint, JSON.stringify({ ...fixture('UserPromptSubmit-1'), session_id }))).toBe(200)

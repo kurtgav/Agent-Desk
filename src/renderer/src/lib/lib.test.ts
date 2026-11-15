@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Snapshot } from '@shared/snapshot'
 import { demoSnapshot } from '../demo/snapshot'
-import { avatarFor, HUES, SHAPES } from './avatar'
-import { ago, ageWords, dateLabel, duration, timeOfDay, tokens, usd, weekDelta } from './format'
+import { agentArt, avatarFor, HUES, MASCOTS, SHAPES } from './avatar'
+import { ago, ageWords, clock, dateLabel, duration, timeOfDay, tokens, usd, weekDelta } from './format'
 import {
   byPriority, filesChanged, needsOkCount, projectName, recentProjects, recentSessions, running,
   summaryLine, tasksFinished, waiting
@@ -36,13 +36,19 @@ describe('format', () => {
     expect(weekDelta(10 * MIN, 10 * MIN)).toBe('Same as last week')
     expect(weekDelta(10 * MIN, 0)).toBe('Nothing to compare with last week')
   })
+  it('shows timeline times: seconds today, the date before today (24-hour)', () => {
+    expect(clock(NOW + 7_000, NOW, 'en-US', 'UTC')).toBe('14:00:07')
+    expect(clock(NOW - 2 * 24 * 60 * MIN + 125 * MIN, NOW, 'en-US', 'UTC')).toBe('Nov 3, 16:05')
+    // Same calendar day in the given zone, not "within 24 hours": 14 hours ago, but yesterday.
+    expect(clock(Date.UTC(2026, 10, 4, 23, 59), NOW, 'en-US', 'UTC')).toBe('Nov 4, 23:59')
+  })
   it('formats money and tokens', () => {
     expect(usd(23.8)).toBe('$23.80')
     expect([940, 812_400, 1_840_000, 12_400_000].map(tokens)).toEqual(['940', '812k', '1.8M', '12M'])
   })
 })
 
-describe('avatar', () => {
+describe('avatar fallback shape', () => {
   it('is deterministic and case-insensitive', () => {
     expect(avatarFor('Explore')).toEqual(avatarFor('explore'))
     expect(SHAPES).toContain(avatarFor('stripe-webhooks').shape)
@@ -51,6 +57,46 @@ describe('avatar', () => {
   it('spreads seeds across shapes', () => {
     const shapes = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'].map((s) => avatarFor(s).shape))
     expect(shapes.size).toBeGreaterThan(3)
+  })
+})
+
+describe('agent mascots', () => {
+  const projects = ['erp', 'fennel', 'agentdeck', 'kurtgavin', 'billing', 'web-app', 'api', 'docs', 'infra', 'mobile', 'stripe-webhooks', 'optimize my repo']
+  const realistic = projects.flatMap((p) => ['c5', '46', '57', 'a1', '9f', '02', 'e7', 'b3', '7d', '18', '3c', 'f0', 'd4', '61', '8a', '25', 'x9'].map((x) => `${p}-${x}`)).slice(0, 200)
+
+  it('ships a pool of distinct, non-empty images, sorted by file name', () => {
+    expect(MASCOTS.length).toBeGreaterThanOrEqual(30)
+    expect(new Set(MASCOTS).size).toBe(MASCOTS.length)
+    expect(MASCOTS.every((url) => /\.webp(\?|$)/.test(url))).toBe(true)
+    expect(MASCOTS).toEqual([...MASCOTS].sort())
+  })
+  it('gives one name one mascot, whatever the case', () => {
+    expect(agentArt('Explore')).toBe(agentArt('explore'))
+    expect(agentArt('erp-fc')).toBe(agentArt('ERP-FC'))
+    expect(agentArt('erp-fc')).toBe(agentArt('erp-fc'))
+  })
+  it('never returns nothing while there are mascots', () => {
+    for (let i = 0; i < 2000; i++) expect(MASCOTS).toContain(agentArt(`agent-${i}`))
+    expect(MASCOTS).toContain(agentArt(''))
+  })
+  it('can reach every mascot', () => {
+    const seen = new Set(Array.from({ length: 5000 }, (_, i) => agentArt(`session-${i}`)))
+    expect(seen.size).toBe(MASCOTS.length)
+  })
+  it('spreads 200 realistic names over at least 80% of the pool', () => {
+    expect(realistic).toHaveLength(200)
+    const seen = new Set(realistic.map((name) => agentArt(name)))
+    expect(seen.size / MASCOTS.length).toBeGreaterThanOrEqual(0.8)
+  })
+  it('shows the demo sessions and agent types with different mascots', () => {
+    const { sessions, recentAgentTypes } = demoSnapshot(NOW)
+    const names = [...sessions.map((x) => x.name), ...recentAgentTypes]
+    expect(new Set(names.map((name) => agentArt(name))).size).toBe(names.length)
+  })
+  it('falls back to the generated shape when the pool is empty', () => {
+    expect(agentArt('Explore', [])).toBeNull()
+    expect(agentArt('Explore', ['/only.webp'])).toBe('/only.webp')
+    expect(SHAPES).toContain(avatarFor('Explore').shape)
   })
 })
 
@@ -88,10 +134,10 @@ describe('selectors on the demo', () => {
     ])
   })
   it('lists working sessions before the ones waiting on you', () => {
-    expect(running(s).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'portal-migration', 'booking-form', 'stripe-webhooks'])
+    expect(running(s).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'invoice-rounding', 'portal-migration', 'booking-form', 'stripe-webhooks'])
   })
   it('lists recent sessions and projects', () => {
-    expect(recentSessions(s, 3).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'stripe-webhooks'])
+    expect(recentSessions(s, 3).map((x) => x.name)).toEqual(['agentdeck-ui', 'auth-tests', 'invoice-rounding'])
     expect(recentProjects(s, 5).map((p) => p.name)).toEqual([
       'agentdeck', 'thirdcode-web', 'billing-api', 'harbor-dental-site', 'northwind-portal'
     ])

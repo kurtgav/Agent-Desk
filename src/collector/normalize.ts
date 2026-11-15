@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { z } from 'zod'
 import { pathKey } from '@shared/paths'
 import { ulid, type AgentEvent, type EventKind } from './events'
@@ -23,7 +23,30 @@ const KINDS: Record<string, EventKind> = {
   TaskCompleted: 'task.completed',
   PreCompact: 'context.compacting',
   CwdChanged: 'cwd.changed',
-  SessionEnd: 'session.ended'
+  SessionEnd: 'session.ended',
+  // Codex only (ADR-0014): Claude Code runs no HTTP hook at SessionStart and has no Interrupt event.
+  SessionStart: 'session.meta',
+  Interrupt: 'turn.interrupted'
+}
+
+/** Who posted the body (server.ts HookMeta): Claude Code itself, or another agent CLI through its shim. */
+export interface HookOrigin {
+  provider: 'claude' | 'codex'
+  pid: number | null
+}
+const CLAUDE: HookOrigin = { provider: 'claude', pid: null }
+
+/** Other CLIs' session ids get their name in front, so they never meet a Claude Code id (ADR-0014). */
+export const sessionKey = (provider: HookOrigin['provider'], id: string): string => (provider === 'claude' ? id : `${provider}:${id}`)
+
+const PATCH_FILE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm
+const PATCH_FILES_MAX = 20
+/** Codex `apply_patch` sends the whole patch, file bodies included: only the files it names and its size are kept (ADR-0009). */
+function slimPatch(input: unknown): unknown {
+  const text = typeof obj(input).command === 'string' ? (obj(input).command as string) : null
+  if (text === null) return input
+  const files = [...text.matchAll(PATCH_FILE)].map((m) => m[1]!.trim()).slice(0, PATCH_FILES_MAX)
+  return { files, size: text.length }
 }
 
 /** ADR-0009: transcripts are internal; their paths are not even stored. */
@@ -45,7 +68,8 @@ export function displayPath(p: string, cwd: string | null): string {
   const abs = resolve(p)
   const base = resolve(cwd)
   if (!pathKey(abs).startsWith(`${pathKey(base)}\\`)) return p
-  return relative(base, abs)
+  // The rest after the base, not path.relative: on macOS that one is case-sensitive, and would say ../Proj/… here.
+  return abs.slice(base.replace(/[\\/]+$/, '').length + 1)
 }
 
 /** docs/EVENT_SCHEMA.md § Activity text. `input` is already redacted. */
@@ -92,6 +116,11 @@ export function activityText(toolName: string, input: Record<string, unknown>, c
     case 'TaskCreate':
     case 'TaskUpdate':
       return 'Updating the plan'
+    case 'apply_patch': {
+      const files = Array.isArray(input.files) ? input.files.filter((f): f is string => typeof f === 'string') : []
+      if (files.length === 1) return `Editing ${code(displayPath(files[0]!, cwd))}`
+      return files.length ? `Editing ${files.length} files` : 'Editing files'
+    }
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName)
   return mcp ? `Using ${mcp[1]} · ${mcp[2]}` : `Using ${toolName}`
@@ -134,6 +163,10 @@ function summaryOf(kind: EventKind, p: Record<string, unknown>, toolName: string
       return `Moved to ${str(p, 'new_cwd') ?? 'another folder'}`
     case 'session.ended':
       return 'Session ended'
+    case 'turn.interrupted':
+      return 'Interrupted'
+    case 'session.meta':
+      return 'Session started'
     default:
       return str(p, 'hook_event_name') ?? 'Unknown event'
   }
@@ -146,7 +179,7 @@ function summaryOf(kind: EventKind, p: Record<string, unknown>, toolName: string
 function payloadOf(body: Record<string, unknown>, toolName: string | null): Record<string, unknown> {
   const p: Record<string, unknown> = { ...body }
   for (const k of DROPPED) delete p[k]
-  if ('tool_input' in p) p.tool_input = slimToolInput(p.tool_input)
+  if ('tool_input' in p) p.tool_input = toolName === 'apply_patch' ? slimPatch(p.tool_input) : slimToolInput(p.tool_input)
   if ('tool_response' in p) p.tool_response = slimToolResponse(toolName, p.tool_response)
   const r = redactDeep(p) as Record<string, unknown>
   return {
@@ -157,8 +190,11 @@ function payloadOf(body: Record<string, unknown>, toolName: string | null): Reco
   }
 }
 
-/** One hook body → one AgentEvent; null when it isn't a hook body at all (dropped, never stored). */
-export function normalizeHook(raw: string, ts: number): AgentEvent | null {
+/**
+ * One hook body → one AgentEvent; null when it isn't a hook body at all (dropped, never stored). Codex sends Claude Code's
+ * field names (ADR-0014), so one parser reads both; `origin` says whose it is, and the pid its shim saw at session start.
+ */
+export function normalizeHook(raw: string, ts: number, origin: HookOrigin = CLAUDE): AgentEvent | null {
   let json: unknown
   try {
     json = JSON.parse(raw)
@@ -180,12 +216,12 @@ export function normalizeHook(raw: string, ts: number): AgentEvent | null {
         : 'unknown' // own keys only: "constructor" or "__proto__" must not reach Object.prototype
   const toolName = str(body, 'tool_name')
   const cwd = str(body, 'cwd')
-  const payload = payloadOf(body, toolName)
+  const payload = { ...payloadOf(body, toolName), ...(origin.pid !== null && { agentdeck_pid: origin.pid }) }
   return {
     id: ulid(ts),
     ts,
     source: 'hook',
-    sessionId: parsed.data.session_id,
+    sessionId: sessionKey(origin.provider, parsed.data.session_id),
     agentId: str(body, 'agent_id'),
     parentAgentId: null, // hooks don't expose nesting depth
     agentType: str(body, 'agent_type'),
