@@ -6,7 +6,7 @@ import { projectName } from '@/lib/selectors'
 import { ModelPicker } from '../console/ModelPicker'
 import { EFFORT_LABEL, MODE_OPTIONS, modeLabel, modelLabel } from '../console/options'
 import { requestNewConversation, setDraft, stopConversation } from '../console/store'
-import { Button, Hint, Kbd } from '../ui'
+import { Button, Hint, Kbd, cn } from '../ui'
 import { AdvancedToggle } from './Advanced'
 import { RoleChips } from './RoleChips'
 import { RolePicker } from './RolePicker'
@@ -66,10 +66,10 @@ function SessionSettings({ m }: { m: Model }) {
   )
 }
 
-function Picker({ m, children }: { m: Model; children: ReactNode }) {
+function Picker({ m, grow = true, children }: { m: Model; grow?: boolean; children: ReactNode }) {
   return (
     <RolePicker mode={m.picker} index={m.ix} recent={m.recent} onPick={m.pickFromPicker} onClose={() => m.setPicker(null)}>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1">{children}</div>
+      <div className={cn('flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1', grow && 'flex-1')}>{children}</div>
     </RolePicker>
   )
 }
@@ -84,30 +84,27 @@ function StopButton({ id }: { id: string }) {
   )
 }
 
-/** Where the session runs and who leads it, then how it runs, then the two ways to start it. */
+/**
+ * One line: where the session runs and who leads it, how it runs, then Advanced and the two ways to start it on the right. It wraps
+ * only when the window is too narrow for all of it, so nothing is ever cut off.
+ */
 export function NewSessionToolbar({ m, advanced, advancedId, onAdvanced }: { m: Model; advanced: boolean; advancedId: string; onAdvanced(): void }) {
   const bg = m.background
   return (
-    <div className="mt-3 flex flex-col gap-1">
-      <Picker m={m}>
+    <div className="mt-3 flex flex-wrap items-center gap-x-0.5 gap-y-1">
+      <Picker m={m} grow={false}>
         <ProjectChip cwd={m.cwd} onPick={(cwd) => cwd && setDraft({ cwd })} />
         <RoleChips variant="new-session" ids={m.ids} index={m.ix} actions={m.chips} />
-        <span className="ml-auto flex-none">
-          <AdvancedToggle open={advanced} controls={advancedId} onToggle={onAdvanced} />
-        </span>
       </Picker>
-      <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5">
-          <SessionSettings m={m} />
-        </div>
-        <div className="flex flex-none items-center gap-1.5">
-          <Hint label={bg && !bg.ok ? bg.reason : 'Start it as a background session (claude --bg). It runs on its own and shows up in Sessions.'} side="top">
-            <Button variant="quiet" size="sm" aria-disabled={m.working || (bg !== null && !bg.ok)} onClick={() => void m.runInBackground()} className="aria-disabled:opacity-50">
-              <Layers size={14} strokeWidth={1.75} aria-hidden /> Run in the background
-            </Button>
-          </Hint>
-          <SendButton m={m} />
-        </div>
+      <SessionSettings m={m} />
+      <div className="ml-auto flex flex-none items-center gap-1.5">
+        <AdvancedToggle open={advanced} controls={advancedId} onToggle={onAdvanced} />
+        <Hint label={bg && !bg.ok ? bg.reason : 'Start it as a background session (claude --bg). It runs on its own and shows up in Sessions.'} side="top">
+          <Button variant="quiet" size="sm" aria-disabled={m.working || (bg !== null && !bg.ok)} onClick={() => void m.runInBackground()} className="aria-disabled:opacity-50">
+            <Layers size={14} strokeWidth={1.75} aria-hidden /> Run in the background
+          </Button>
+        </Hint>
+        <SendButton m={m} />
       </div>
     </div>
   )
