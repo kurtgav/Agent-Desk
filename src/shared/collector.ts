@@ -18,6 +18,8 @@ export interface CollectorInit {
   weeklyBudgetUsd?: number
   /** `usage.readLogs` (ADR-0009 amendment): read token counts from Claude Code's local logs. Off unless the user switched it on. */
   readLogs?: boolean
+  /** Where AgentDeck's status line script saves the plan limits (ADR-0009 amendment); read only while the file exists. */
+  planLimitsFile?: string
 }
 
 /** A row of the report history as the collector knows it: `hasFile` is main's to fill in, `closed` is main's to read. */

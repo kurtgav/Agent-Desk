@@ -1,21 +1,72 @@
 import { PanelLeft, Settings } from 'lucide-react'
+import type { PlanLimits, PlanWindow, Usage as UsageFigures } from '@shared/snapshot'
 import { useUi } from '@/store'
-import { clockTime, useClaudeLink, usageState } from '@/lib/claudeLink'
+import { PLAN_LIMITS_STALE_MS, clockTime, resetTime, useClaudeLink, usageState } from '@/lib/claudeLink'
 import { duration, tokens, usd } from '@/lib/format'
 import { openSettings } from './settings/actions'
 import { TOGGLE_ID } from './shell/CollapsedRail'
 import { Hint, IconButton } from './ui'
 import { UserAvatar } from './UserAvatar'
 
+/** One of the plan's windows: "Session 16%  resets 2:10 PM" over a thin meter, as claude.ai's Settings › Usage writes it. */
+function PlanWindowLine({ label, w, day, className }: { label: string; w: PlanWindow; day?: boolean; className?: string }) {
+  const pct = Math.round(w.usedPct)
+  const resets = `resets ${resetTime(w.resetsAt, day)}`
+  return (
+    <div className={className}>
+      <p className="flex items-baseline gap-1.5 tabular-nums">
+        <span className="text-[13px] font-medium">
+          {label} {pct}%
+        </span>
+        <span className="t-meta min-w-0 flex-1 truncate text-muted">{resets}</span>
+      </p>
+      <div
+        role="meter"
+        aria-label={`${label} limit used`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={`${pct}% used, ${resets}`}
+        className="mt-1 h-1 overflow-hidden rounded-full bg-track"
+      >
+        <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/** The plan's real limits from Claude Code's status line (ADR-0009 amendment); the dollar estimate moves to the tooltip. */
+function PlanLimitsBlock({ limits, usage }: { limits: PlanLimits; usage: UsageFigures | null }) {
+  const now = useUi((s) => s.now)
+  const old = now - limits.at > PLAN_LIMITS_STALE_MS
+  // A figure from an earlier day names the day too.
+  const asOf = resetTime(limits.at, new Date(limits.at).toDateString() !== new Date(now).toDateString())
+  const detail = [
+    `Your plan's limits, from Claude Code's status line${old ? `, as of ${asOf}` : ''}`,
+    ...(usage ? [`${usd(usage.weekCostUsd)} of ${usd(usage.weeklyBudgetUsd)} this week (API-equivalent estimate)`] : [])
+  ]
+  return (
+    <div role="group" aria-label="Plan usage" title={detail.join('\n')} className="px-2">
+      {limits.session && <PlanWindowLine label="Session" w={limits.session} />}
+      {limits.week && <PlanWindowLine label="Week" w={limits.week} day className={limits.session ? 'mt-1.5' : undefined} />}
+      {old && <p className="t-meta mt-1 truncate tabular-nums text-muted">as of {asOf}</p>}
+    </div>
+  )
+}
+
 /**
  * Usage, as one quiet line: a status line, so it recedes; the Overview and Settings > Claude Code have the rest. It never tells you to
  * start a new session when the logs can be read: with `usage.readLogs` on it reads them (a progress bar the first time), with it off it
- * shows the agent time AgentDeck knows without any setting and offers the switch (D-139 superseded, ADR-0009 amendment).
+ * shows the agent time AgentDeck knows without any setting and offers the switch (D-139 superseded, ADR-0009 amendment). When Claude
+ * Code's status line passed the plan's own limits, those show instead (D-172).
  */
 function Usage() {
   const usage = useUi((s) => s.snapshot.usage)
   const week = useUi((s) => s.snapshot.week)
+  const limits = useUi((s) => s.snapshot.planLimits)
   const state = usageState(usage, useClaudeLink())
+
+  if (limits && (limits.session || limits.week)) return <PlanLimitsBlock limits={limits} usage={usage} />
 
   if (state === 'reading') {
     const scan = usage?.logs?.scan

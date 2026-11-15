@@ -11,6 +11,7 @@ import type { AgentEvent } from './events'
 import { resolveClaude, run } from './cli'
 import { Holds, faithfulPreview, type AuditRow } from './holds'
 import { normalizeHook, type HookOrigin } from './normalize'
+import { planLimitsReader } from './plan-limits'
 import { Poller, exePaths, vanished } from './poll'
 import { TaskFollower, WORK_COALESCE_MS, statusesOf, touchesReport, trailing } from './follow'
 import { listen } from './server'
@@ -38,6 +39,8 @@ export interface CollectorOptions {
   weeklyBudgetUsd?: number
   /** `usage.readLogs` (ADR-0009 amendment): read token counts from Claude Code's local logs. Off unless the user switched it on. */
   readLogs?: boolean
+  /** The plan limits AgentDeck's status line script saves (ADR-0009 amendment). */
+  planLimitsFile?: string
   /** The `projects` folders to read; the default is found from CLAUDE_CONFIG_DIR and the home folder. For tests. */
   usageLogRoots?: readonly string[]
   /** Something the UI shows changed. */
@@ -280,10 +283,12 @@ export async function startCollector(o: CollectorOptions): Promise<Collector> {
     }
   }
 
+  const planLimits = planLimitsReader(o.planLimitsFile)
   const snapshot = (): Snapshot => {
     const now = Date.now()
     if (now - agents.at > AGENT_COUNT_TTL_MS) agents = { count: countAgents(o.agentsDir), at: now }
-    return store.snapshot(now, { awaySince: away.since, awayUntil: away.until, agentDefinitionCount: agents.count, weeklyBudgetUsd: budget, usageLogs: logs?.status() })
+    const s = store.snapshot(now, { awaySince: away.since, awayUntil: away.until, agentDefinitionCount: agents.count, weeklyBudgetUsd: budget, usageLogs: logs?.status() })
+    return { ...s, planLimits: planLimits(now) }
   }
 
   let server: Server

@@ -202,6 +202,10 @@ export interface AgentDeckBridge {
   previewUsageTelemetry(on: boolean): Promise<HooksPreview>
   /** Writes settings.json; only after the user read the preview's diff. */
   setUsageTelemetry(on: boolean): Promise<HooksResult>
+  /** A dry run of turning AgentDeck's status line (the plan's own limits) on or off in settings.json, values masked. */
+  previewPlanUsage(on: boolean): Promise<HooksPreview>
+  /** Writes settings.json; only after the user read the preview's diff. */
+  setPlanUsage(on: boolean): Promise<HooksResult>
 
   /** The Console (shared/console.ts). Conversations run as child `claude -p` processes of main; nothing is stored. */
   consoleStart(req: ConsoleStart): Promise<ConsoleStartResult>
@@ -307,6 +311,8 @@ export const IPC = {
   getClaudeLink: 'claude:link',
   previewUsageTelemetry: 'claude:usage-preview',
   setUsageTelemetry: 'claude:usage-set',
+  previewPlanUsage: 'claude:plan-usage-preview',
+  setPlanUsage: 'claude:plan-usage-set',
   consoleStart: 'console:start',
   consoleSend: 'console:send',
   consoleStop: 'console:stop',

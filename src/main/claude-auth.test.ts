@@ -25,6 +25,9 @@ describe('parseAuth', () => {
     expect(parseAuth(status({}))).toEqual({ signIn: 'subscription', plan: 'Max 20x' })
     expect(parseAuth(status({ planTier: 'max_5x' }))).toEqual({ signIn: 'subscription', plan: 'Max 5x' })
     expect(parseAuth(status({ planTier: undefined, subscriptionType: 'pro' }))).toEqual({ signIn: 'subscription', plan: 'Pro' })
+    expect(parseAuth(status({ planTier: undefined, subscriptionType: 'ultra' }))).toEqual({ signIn: 'subscription', plan: 'Ultra' })
+    expect(parseAuth(status({ planTier: 'ultra', subscriptionType: 'Ultra' }))).toEqual({ signIn: 'subscription', plan: 'Ultra' })
+    expect(parseAuth(status({ planTier: undefined, subscriptionType: 'mega' }))).toEqual({ signIn: 'subscription', plan: null })
   })
 
   it('returns no email, organisation, id, path or date: only a method and a plan word', () => {

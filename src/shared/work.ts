@@ -207,6 +207,11 @@ export interface ClaudeLink {
   plan: string | null
   /** `enabled`: Claude Code's telemetry points at AgentDeck in settings.json. `receiving`: figures arrived in the last day. `readLogs`: the opt-in to read token counts from the local logs is on. */
   usage: { enabled: boolean; receiving: boolean; readLogs: boolean }
+  /**
+   * AgentDeck's status line in settings.json (ADR-0009 amendment), which saves the plan's limits: `on`, `off`, `stale` (ours, but
+   * its script is missing or the command differs) or `elsewhere` (the user's own status line). Absent until main has looked.
+   */
+  planUsage?: 'off' | 'on' | 'stale' | 'elsewhere'
 }
 
 export interface DiagnosticCheck {

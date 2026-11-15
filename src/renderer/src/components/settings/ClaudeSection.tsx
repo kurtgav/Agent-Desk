@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { WEEKLY_BUDGET_MAX_USD } from '@shared/work'
-import { blockText, logsStatus, modelLabel, parseBudget, refreshClaudeLink, signInSummary, useClaudeLink, usageHelp } from '@/lib/claudeLink'
+import { blockText, logsStatus, modelLabel, parseBudget, planUsageHelp, refreshClaudeLink, signInSummary, useClaudeLink, usageHelp } from '@/lib/claudeLink'
 import { tokens } from '@/lib/format'
 import { useUi } from '@/store'
 import { UsageDialog, type UsageMode } from '../UsageDialog'
@@ -13,12 +13,13 @@ const NOT_A_BUDGET = `Enter a weekly budget in dollars: more than zero, and at m
 
 /**
  * Settings › Claude Code (ADR-0007, ADR-0009): where the local CLI stands, whether AgentDeck's sessions run on a subscription,
- * the opt-in that points Claude Code's usage telemetry at AgentDeck, and the weekly budget. It reads no credentials and
- * cannot see the plan's own limits, and says so.
+ * the opt-in that shows the plan's own limits through Claude Code's status line, the opt-in that points Claude Code's usage
+ * telemetry at AgentDeck, and the weekly budget. It reads no credentials.
  */
 export function ClaudeSection({ api }: { api: SettingsApi }) {
   const link = useClaudeLink()
   const [dialog, setDialog] = useState<UsageMode | null>(null)
+  const [planDialog, setPlanDialog] = useState<UsageMode | null>(null)
   const [checking, setChecking] = useState(false)
   const { weeklyBudgetUsd: budget, readLogs } = api.settings.usage
   const usage = useUi((s) => s.snapshot.usage)
@@ -95,6 +96,13 @@ export function ClaudeSection({ api }: { api: SettingsApi }) {
           {sign && sign.tone !== 'unknown' && <Verdict ok={sign.tone === 'ok'} okLabel="Signed in" badLabel="Signed out" />}
         </Row>
         <SwitchRow
+          title="Show my plan's session and weekly limits"
+          help={planUsageHelp(link?.planUsage)}
+          checked={link?.planUsage === 'on' || link?.planUsage === 'stale'}
+          disabled={!link?.planUsage}
+          onChange={(on) => setPlanDialog(on ? 'on' : 'off')}
+        />
+        <SwitchRow
           title="Read token counts from Claude Code's logs"
           help="Shows usage at once, for sessions already open too, and as they work. Off until you switch it on."
           checked={readLogs}
@@ -123,7 +131,7 @@ export function ClaudeSection({ api }: { api: SettingsApi }) {
             title="Current 5-hour window (estimate)"
             help={
               logs.block
-                ? `${blockText(logs.block)} Claude's real limit can't be read from this PC: this follows the rule ccusage uses.`
+                ? `${blockText(logs.block)} An estimate by the rule ccusage uses; the plan limits switch above shows the real one.`
                 : 'No window is open: nothing was logged in the last 5 hours.'
             }
           />
@@ -167,11 +175,12 @@ export function ClaudeSection({ api }: { api: SettingsApi }) {
           </div>
         </Row>
         <p className="border-t border-rule px-4 py-3 text-[12px] leading-4 text-muted">
-          <Inline text="AgentDeck cannot see your 5-hour or weekly plan limits. Claude Code's `/usage` shows them." /> Cost figures are an estimate: what the same tokens would cost at
-          API prices, while a subscription is a flat fee.
+          Your plan's session and weekly limits come from Claude Code itself, through its status line, once a session has had a reply; only a Claude subscription has
+          them. Cost figures are an estimate: what the same tokens would cost at API prices, while a subscription is a flat fee.
         </p>
       </Section>
       <UsageDialog mode={dialog} onClose={() => setDialog(null)} onDone={() => void refreshClaudeLink()} />
+      <UsageDialog kind="plan" mode={planDialog} onClose={() => setPlanDialog(null)} onDone={() => void refreshClaudeLink()} />
     </>
   )
 }

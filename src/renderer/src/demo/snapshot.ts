@@ -49,6 +49,15 @@ const EDITS: [keyof typeof PATHS, string, string, string, number][] = [
 const TURNS = [12, 23, 38, 51, 67, 88, 130, 178, 240, 300, 420, 610, 760, 900, 1020, 1180, 1300,
   1450, 1600, 1720, 1880, 2050, 2200, 2400, 2600, 2900, 3100, 3300, 3600, 3900, 4200]
 
+/** The demo plan's weekly reset: the next Friday, 1:00 PM local, as claude.ai's Settings › Usage shows one. */
+function nextFriday1pm(now: number): number {
+  const d = new Date(now)
+  d.setHours(13, 0, 0, 0)
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7))
+  if (d.getTime() <= now) d.setDate(d.getDate() + 7)
+  return d.getTime()
+}
+
 export function demoSnapshot(now: number): Snapshot {
   const ago = (minutes: number): number => Math.round(now - minutes * MIN)
   // A session that stopped a couple of hours ago stopped today, even when the demo is opened just after midnight (the Done today lane).
@@ -141,6 +150,7 @@ export function demoSnapshot(now: number): Snapshot {
     files,
     week: { agentTimeMs: (14 * 60 + 25) * MIN, agentTimeLastWeekMs: (11 * 60 + 50) * MIN, finishedTurns: TURNS.map(ago) },
     usage: { todayTokens: 1_840_000, weekTokens: 9_620_000, todayCostUsd: 4.12, weekCostUsd: 23.8, weeklyBudgetUsd: 40 },
+    planLimits: { session: { usedPct: 16, resetsAt: Math.round(now + 100 * MIN) }, week: { usedPct: 23, resetsAt: nextFriday1pm(now) }, at: ago(1) },
     recentAgentTypes: ['Explore', 'Plan', 'code-reviewer', 'tdd-guide'],
     agentDefinitionCount: 4 // the Agents page lists the same four in demo, so the sidebar count must match
   }

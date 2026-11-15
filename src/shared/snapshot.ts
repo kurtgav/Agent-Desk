@@ -114,6 +114,17 @@ export const Usage = z.object({
 })
 export type Usage = z.infer<typeof Usage>
 
+/** One of the plan's own limit windows, as Claude Code's status line passes it: the share used and when it resets (epoch ms). */
+export const PlanWindow = z.object({ usedPct: z.number().min(0).max(100), resetsAt: Ts })
+export type PlanWindow = z.infer<typeof PlanWindow>
+
+/**
+ * The plan's real limits (ADR-0009 amendment, status line): the 5-hour session and the 7-day week, each null when Claude Code
+ * did not pass it or it has reset since. `at` is when the status line last saved them.
+ */
+export const PlanLimits = z.object({ session: PlanWindow.nullable(), week: PlanWindow.nullable(), at: Ts })
+export type PlanLimits = z.infer<typeof PlanLimits>
+
 /** D-046: the snapshot keeps the newest 50 sessions and the newest 200 changed files; the list pages say so. */
 export const SNAPSHOT_SESSIONS_MAX = 50
 export const SNAPSHOT_FILES_MAX = 200
@@ -137,6 +148,8 @@ export const Snapshot = z.object({
   }),
   /** Null when telemetry is off (ADR-0007): the Usage card shows the enable prompt. */
   usage: Usage.nullable(),
+  /** Null or absent while the status line switch is off or nothing was saved yet; optional so older snapshots still parse. */
+  planLimits: PlanLimits.nullable().optional(),
   recentAgentTypes: z.array(z.string()),
   agentDefinitionCount: z.number().int().nonnegative()
 })

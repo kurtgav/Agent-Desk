@@ -7,6 +7,7 @@ import type { ClaudeLink } from '@shared/work'
 import { cleanEnv, resolveClaude, run } from '../collector/cli'
 import { readAuth, type AuthRead } from './claude-auth'
 import { foreignTelemetryKeys, type TelemetryTarget } from './claude-telemetry'
+import { previewStatusLine, setStatusLine, statusLineState } from './claude-statusline-install'
 import { previewTelemetry, setTelemetry, telemetryState } from './claude-telemetry-install'
 import { readConfig } from './config'
 import { readLogsOn } from './settings-model'
@@ -28,7 +29,8 @@ const DEMO_LINK: ClaudeLink = {
   cli: { found: true, path: 'C:\\Users\\Kurt\\.local\\bin\\claude.exe', version: '2.1.323' },
   signIn: 'subscription',
   plan: 'Max',
-  usage: { enabled: true, receiving: true, readLogs: true }
+  usage: { enabled: true, receiving: true, readLogs: true },
+  planUsage: 'on'
 }
 
 /** What an error leaves: nothing is claimed, and the page shows its "could not tell" wording. */
@@ -89,8 +91,9 @@ const versionOf = (stdout: string): string | null => VERSION.exec(stdout.trim())
 
 /**
  * The Claude Code link: sign-in state from the CLI's own `claude auth status`, and the opt-in that points Claude Code's usage
- * telemetry at AgentDeck (ADR-0007, ADR-0009). Registers IPC.getClaudeLink, previewUsageTelemetry and setUsageTelemetry.
- * Telemetry entries stay in settings.json when AgentDeck quits (ADR-0007); `--uninstall-integration` removes them.
+ * telemetry at AgentDeck (ADR-0007, ADR-0009), and the status line that saves the plan's limits (ADR-0009 amendment). Registers
+ * IPC.getClaudeLink, previewUsageTelemetry, setUsageTelemetry, previewPlanUsage and setPlanUsage.
+ * Telemetry entries and the status line stay in settings.json when AgentDeck quits; `--uninstall-integration` removes them.
  */
 export function registerClaude(ctx: MainCtx): Dispose {
   let cliPath: string | null = null
@@ -150,8 +153,14 @@ export function registerClaude(ctx: MainCtx): Dispose {
     return r
   }
 
-  ctx.handle(IPC.getClaudeLink, () => (ctx.demo() ? DEMO_LINK : reader.read()))
+  /** AgentDeck's status line script and what it saves (ADR-0009 amendment). */
+  const statusDir = (): string => join(ctx.userData(), 'statusline')
+
+  // The status line state is one read of settings.json, so it is looked at on every ask, outside the probe's cache.
+  ctx.handle(IPC.getClaudeLink, async () => (ctx.demo() ? DEMO_LINK : { ...(await reader.read()), planUsage: statusLineState(paths(), statusDir()) }))
   ctx.handle(IPC.previewUsageTelemetry, (_e, on) => preview(z.boolean().parse(on)))
   ctx.handle(IPC.setUsageTelemetry, (_e, on) => set(z.boolean().parse(on)))
+  ctx.handle(IPC.previewPlanUsage, (_e, on) => (ctx.demo() ? refused() : previewStatusLine(paths(), statusDir(), z.boolean().parse(on))))
+  ctx.handle(IPC.setPlanUsage, (_e, on) => (ctx.demo() ? { ok: false, error: DEMO_REFUSED } : setStatusLine(paths(), statusDir(), z.boolean().parse(on))))
   return reader.invalidate
 }

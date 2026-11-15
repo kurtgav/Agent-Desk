@@ -21,6 +21,8 @@ import { isAppUrl } from './app-url'
 import { superviseCollector, type Supervisor } from './collector'
 import { readConfig, remoteApprovals, updateConfig } from './config'
 import { registerClaude } from './claude'
+import { LIMITS_FILE } from './claude-statusline'
+import { removeStatusLine } from './claude-statusline-install'
 import { removeTelemetry } from './claude-telemetry-install'
 import { codexPaths, codexState, codexTarget, installCodex, parkCurlrc, previewCodex, uninstallCodex, writeCurlrc, type CodexPaths } from './codex-hooks'
 import { registerConsole } from './console'
@@ -92,18 +94,20 @@ const signals = new Signals({
 
 if (process.argv.includes('--uninstall-integration')) {
   // The installer's uninstall step (ADR-0012): take our entries out of settings.json and exit without a window.
-  // Our hook entries and our telemetry env entries (ADR-0007: those stay while AgentDeck runs, so only this removes them),
+  // Our hook entries, our telemetry env entries and our status line (ADR-0007, ADR-0009: the last two stay when AgentDeck quits, so only this removes them),
   // and our entries in Codex's hooks.json with the curlrc they read (ADR-0014: those stay while AgentDeck is closed).
   // It runs beside a live AgentDeck, so it must not take the single-instance lock.
   void app.whenReady().then(() => {
     const r = uninstall(hookPaths())
     const t = removeTelemetry(hookPaths())
     const c = uninstallCodex(codexHookPaths())
+    const s = removeStatusLine(hookPaths(), statusLineDir())
     if (r.ok) updateConfig(configFile(), { hooksConsent: null, remoteApprovals: { ...approvalsConfig(), enabled: false } })
     else console.error(`[hooks] uninstall integration: ${r.error}`)
     if (!t.ok) console.error(`[telemetry] uninstall integration: ${t.error}`)
     if (!c.ok) console.error(`[codex] uninstall integration: ${c.error}`)
-    app.exit(r.ok && t.ok && c.ok ? 0 : 1)
+    if (!s.ok) console.error(`[statusline] uninstall integration: ${s.error}`)
+    app.exit(r.ok && t.ok && c.ok && s.ok ? 0 : 1)
   })
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -136,6 +140,9 @@ if (process.argv.includes('--uninstall-integration')) {
 function hookPaths(): HookPaths {
   return { settings: settingsPath(process.env, homedir()), backups: join(app.getPath('userData'), 'backups') }
 }
+
+/** AgentDeck's status line script and the plan limits it saves (ADR-0009 amendment). */
+const statusLineDir = (): string => join(app.getPath('userData'), 'statusline')
 
 const approvalsConfig = (): RemoteApprovals => remoteApprovals(readConfig(configFile()))
 
@@ -410,7 +417,8 @@ function startCollector(): void {
       // AGENTDECK_POLL=0: smoke tests must not list the real sessions on the machine running them.
       claude: process.env.AGENTDECK_POLL === '0' ? false : typeof config.claudePath === 'string' ? config.claudePath : undefined,
       weeklyBudgetUsd: weeklyBudget(config),
-      readLogs: !demo && readLogsOn(config)
+      readLogs: !demo && readLogsOn(config),
+      planLimitsFile: join(statusLineDir(), LIMITS_FILE)
     },
     onCollectorMessage,
     onCollectorDown

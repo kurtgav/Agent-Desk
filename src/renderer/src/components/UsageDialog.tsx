@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { HooksPreview } from '@shared/bridge'
+import type { AgentDeckBridge, HooksPreview, HooksResult } from '@shared/bridge'
 import { Button, Code, cn, modalFooter, modalLede, modalOverlay, modalPanel, modalTitle } from './ui'
 
 export type UsageMode = 'on' | 'off'
+/** `telemetry`: Claude Code's usage figures (ADR-0007). `plan`: AgentDeck's status line, for the plan's own limits (ADR-0009 amendment). */
+export type UsageKind = 'telemetry' | 'plan'
 
-const COPY: Record<UsageMode, { title: string; lead: string; action: string; nothing: string }> = {
+type Copy = Record<UsageMode, { title: string; lead: string; action: string; nothing: string }>
+
+const TELEMETRY: Copy = {
   on: {
     title: 'Send usage figures to AgentDeck',
     lead: "AgentDeck adds a few environment settings to your Claude Code user settings. Claude Code then tells AgentDeck, on this PC only, how many tokens each request used and its estimated cost. No prompts, replies, file contents or account details are sent. It applies to sessions you start after this.",
@@ -20,6 +24,27 @@ const COPY: Record<UsageMode, { title: string; lead: string; action: string; not
   }
 }
 
+const PLAN: Copy = {
+  on: {
+    title: 'Show your plan limits',
+    lead: "AgentDeck sets Claude Code's status line to a small script in AgentDeck's folder. Each time Claude Code updates the status line, the script saves your plan's session and weekly limits (the share used, and when each resets) for AgentDeck, on this PC only. If you have your own status line, it keeps running and showing what it prints. No prompts, replies, file contents or account details are read.",
+    action: 'Turn on plan limits',
+    nothing: "settings.json already uses AgentDeck's status line."
+  },
+  off: {
+    title: 'Stop showing plan limits',
+    lead: 'Puts your own status line back as it was, or removes the status line if you had none, and deletes the limits AgentDeck saved.',
+    action: 'Turn off plan limits',
+    nothing: 'settings.json has no AgentDeck status line, so AgentDeck leaves yours as it is.'
+  }
+}
+
+type Calls = { copy: Copy; preview(b: AgentDeckBridge, on: boolean): Promise<HooksPreview>; set(b: AgentDeckBridge, on: boolean): Promise<HooksResult> }
+const KINDS: Record<UsageKind, Calls> = {
+  telemetry: { copy: TELEMETRY, preview: (b, on) => b.previewUsageTelemetry(on), set: (b, on) => b.setUsageTelemetry(on) },
+  plan: { copy: PLAN, preview: (b, on) => b.previewPlanUsage(on), set: (b, on) => b.setPlanUsage(on) }
+}
+
 /** One line of the masked unified diff, coloured by its marker (the same reading as the hooks dialog). */
 function DiffLine({ line }: { line: string }) {
   const tone = line.startsWith('@@') ? 'text-muted' : line.startsWith('+') ? 'bg-[var(--done-bg)] text-[var(--done-ink)]' : line.startsWith('-') ? 'bg-[var(--failed-bg)] text-[var(--failed-ink)]' : ''
@@ -27,10 +52,10 @@ function DiffLine({ line }: { line: string }) {
 }
 
 /**
- * ADR-0005 § 4 for the usage entries (ADR-0007): the exact change to settings.json is shown first, and main writes it
- * only from the button here.
+ * ADR-0005 § 4 for the usage entries (ADR-0007) and the status line (ADR-0009 amendment): the exact change to settings.json
+ * is shown first, and main writes it only from the button here.
  */
-export function UsageDialog({ mode, onClose, onDone }: { mode: UsageMode | null; onClose: () => void; onDone: () => void }) {
+export function UsageDialog({ kind = 'telemetry', mode, onClose, onDone }: { kind?: UsageKind; mode: UsageMode | null; onClose: () => void; onDone: () => void }) {
   const [preview, setPreview] = useState<HooksPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,20 +66,20 @@ export function UsageDialog({ mode, onClose, onDone }: { mode: UsageMode | null;
     let current = true
     setPreview(null)
     setError(null)
-    void bridge
-      .previewUsageTelemetry(mode === 'on')
+    void KINDS[kind]
+      .preview(bridge, mode === 'on')
       .then((p) => current && setPreview(p))
       .catch((e: unknown) => current && setError(e instanceof Error ? e.message : String(e)))
     return () => {
       current = false
     }
-  }, [mode])
+  }, [mode, kind])
 
   const apply = async (): Promise<void> => {
     const bridge = window.agentdeck
     if (!mode || !bridge) return
     setBusy(true)
-    const r = await bridge.setUsageTelemetry(mode === 'on').catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+    const r = await KINDS[kind].set(bridge, mode === 'on').catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
     setBusy(false)
     if (r.ok) {
       onDone()
@@ -62,7 +87,7 @@ export function UsageDialog({ mode, onClose, onDone }: { mode: UsageMode | null;
     } else setError(r.error)
   }
 
-  const copy = mode ? COPY[mode] : null
+  const copy = mode ? KINDS[kind].copy[mode] : null
   // The diff's first two lines are the ---/+++ file headers.
   const lines = preview?.ok ? preview.diff.split('\n').slice(2) : []
   return (
@@ -86,9 +111,18 @@ export function UsageDialog({ mode, onClose, onDone }: { mode: UsageMode | null;
               <p className="mt-4 text-[13px] leading-5">
                 File: <Code className="break-all">{preview.path}</Code>
               </p>
+              {preview.conflicts.length > 0 && (
+                <ul className="mt-3 flex flex-col gap-1 rounded-tile bg-[var(--needs-bg)] p-3 text-[13px] text-[var(--needs-ink)]">
+                  {preview.conflicts.map((c) => (
+                    <li key={c}>{c}</li>
+                  ))}
+                </ul>
+              )}
               {preview.changed && (
                 <p className="t-meta mt-1.5 text-muted">
-                  A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. Below, the values already in your file and AgentDeck's token are hidden; the keys and AgentDeck's address show.
+                  A copy of the current file is saved first in <code className="break-all">{preview.backups}</code>. {kind === 'plan'
+                    ? "Below, the values in your file and the path of AgentDeck's script are hidden; the keys show."
+                    : "Below, the values already in your file and AgentDeck's token are hidden; the keys and AgentDeck's address show."}
                 </p>
               )}
               {preview.changed ? (

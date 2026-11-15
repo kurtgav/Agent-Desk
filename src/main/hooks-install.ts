@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { findNodeAtLocation, parseTree, type JSONPath, type Node, type ParseError } from 'jsonc-parser'
+import { isOurStatusLine } from './claude-statusline'
 import { stripTelemetry } from './claude-telemetry'
 
 /** SessionStart is excluded: HTTP hooks don't run there (D-004). */
@@ -201,6 +202,15 @@ export function append(text: string, path: JSONPath, value: unknown, key?: strin
   return splice(text, box.offset + 1, box.offset + box.length - 1, `${eol}${inner}${body}${eol}${outer}`)
 }
 
+/** Writes `value` over the value at `path`, indented like the line its key is on; the key and its neighbours keep their bytes. */
+export function replace(text: string, path: JSONPath, value: unknown): string {
+  const unit = /^([ \t]+)\S/m.exec(text)?.[1] ?? '  '
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const node = findNodeAtLocation(tree(text), path)!
+  const lead = indentAt(text, node.parent?.type === 'property' ? node.parent.offset : node.offset, unit)
+  return splice(text, node.offset, node.offset + node.length, JSON.stringify(value, null, unit).replaceAll('\n', eol + lead))
+}
+
 /** Deletes the array item or object property at `path`, with the comma and whitespace that joined it to a sibling. */
 export function remove(text: string, path: JSONPath): string {
   const value = findNodeAtLocation(tree(text), path)!
@@ -298,15 +308,25 @@ export function inspect<T = HookTarget>(text: string | null, target: NoInfer<T> 
   return { ok: true, installed, conflicts: spec.conflicts?.(parsed.root, target) ?? [] }
 }
 
+/** Without `statusLine` when either side's is ours: turning it on or off swaps that one value on purpose (ADR-0009 amendment). */
+function stripStatusLine(a: Json, b: Json): [Json, Json] {
+  if (!isOurStatusLine(a.statusLine) && !isOurStatusLine(b.statusLine)) return [a, b]
+  const drop = (r: Json): Json => Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'statusLine'))
+  return [drop(a), drop(b)]
+}
+
 /**
  * True when `after` keeps every foreign (non-ours) piece of `before` deep-equal, i.e. stripping ours from both gives equal
- * objects. Ours are the hook entries (ADR-0005) and, in settings.json, the telemetry `env` entries (ADR-0007).
+ * objects. Ours are the hook entries (ADR-0005), and in settings.json the telemetry `env` entries (ADR-0007) and our status line.
  */
 export function foreignUnchanged(before: string | null, after: string, spec: HookFile = CLAUDE): boolean {
   const a = parse(before, spec.file)
   const b = parse(after, spec.file)
+  if (!a.ok || !b.ok) return false
+  // Only ever ours in settings.json: a hooks.json never holds our status line, so this strips nothing there.
+  const [x, y] = stripStatusLine(a.root, b.root)
   const other = spec.stripOther ?? ((root: Json): Json => root)
-  return a.ok && b.ok && isDeepStrictEqual(other(strip(a.root, PRUNE_ALL, spec.isOurs)), other(strip(b.root, PRUNE_ALL, spec.isOurs)))
+  return isDeepStrictEqual(other(strip(x, PRUNE_ALL, spec.isOurs)), other(strip(y, PRUNE_ALL, spec.isOurs)))
 }
 
 /** `*` matches any run of characters. Linear: the pattern comes from the user's file, so no regex to backtrack. */
@@ -368,9 +388,9 @@ function lineOps(a: string[], b: string[]): Op[] {
 }
 
 const JSON_STRING = /"(?:[^"\\]|\\.)*"(\s*:)?/g
-const SHOWN = /^"(?:http|http:\/\/127\.0\.0\.1:\d+\/(?:hooks|v1\/metrics)|1|otlp|http\/json|10000)"$/
+const SHOWN = /^"(?:http|command|http:\/\/127\.0\.0\.1:\d+\/(?:hooks|v1\/metrics)|1|otlp|http\/json|10000)"$/
 /**
- * Structure only: keys stay, every string value is hidden except our entry's type and URL, and the telemetry values that
+ * Structure only: keys stay, every string value is hidden except an entry's type ("http", "command") and our URL, and the telemetry values that
  * name no one (1, otlp, http/json, 10000, the loopback metrics URL). The tokens are hidden. Pattern masking missed
  * secrets in shapes it didn't know (M3 security review), and the token can sit on a line of its own.
  */

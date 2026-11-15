@@ -15,7 +15,7 @@ export interface AuthRead {
 const UNKNOWN: AuthRead = { signIn: 'unknown', plan: null }
 
 /** Words the CLI is known to use for `subscriptionType`; anything else is not shown (it could be anything). */
-const PLANS: Readonly<Record<string, string>> = { pro: 'Pro', max: 'Max', team: 'Team', enterprise: 'Enterprise', free: 'Free' }
+const PLANS: Readonly<Record<string, string>> = { pro: 'Pro', max: 'Max', ultra: 'Ultra', team: 'Team', enterprise: 'Enterprise', free: 'Free' }
 /** `planTier` for Max: "max_5x", "max_20x". */
 const MAX_TIER = /^max_(5|20)x$/
 const API_KEY_METHOD = /api[_ -]?key|console/i

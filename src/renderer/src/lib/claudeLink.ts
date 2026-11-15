@@ -119,6 +119,29 @@ export function figureAge(ms: number): string {
 /** "14:00", in the reader's own clock and format. */
 export const clockTime = (ts: number): string => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
+/** "2:10 PM", or "Fri 1:00 PM" with the day, in the reader's own clock: how claude.ai's Settings › Usage writes a reset. */
+export const resetTime = (ts: number, day = false): string =>
+  new Date(ts).toLocaleString([], { ...(day ? { weekday: 'short' as const } : {}), hour: 'numeric', minute: '2-digit' })
+
+/** Plan limits older than this say when they are from: the status line runs about every minute while a session is open. */
+export const PLAN_LIMITS_STALE_MS = 10 * 60_000
+
+/** The line under the plan limits switch in Settings (ADR-0009 amendment). */
+export function planUsageHelp(state: ClaudeLink['planUsage']): string {
+  switch (state) {
+    case 'on':
+      return "On. Claude Code's status line passes your plan's limits to AgentDeck after each reply; the sidebar shows them. Only a Claude subscription (Pro, Max, Ultra) has them."
+    case 'stale':
+      return "AgentDeck's status line is set, but its script is missing or was written for another folder. Turn this off and on again to repair it."
+    case 'elsewhere':
+      return 'Off. You have your own status line. Turning this on keeps it: AgentDeck runs it and shows what it prints, and only reads the limits.'
+    case 'off':
+      return "Off. Shows the session (5-hour) and weekly limits claude.ai's Settings › Usage shows, from Claude Code's status line. You see the exact change to your Claude Code settings first."
+    default:
+      return 'Checking…'
+  }
+}
+
 /** Settings' live line while the log reader is on: "Reading 214 log files, last figure 12 s ago". */
 export function logsStatus(logs: NonNullable<Usage['logs']>, now: number): string {
   if (logs.scan) return `Reading your logs: ${logs.scan.done} of ${logs.scan.total} files.`
