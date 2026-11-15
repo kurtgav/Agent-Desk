@@ -1,11 +1,10 @@
 import { canGoBack, canGoForward, pushNav, startHistory, stepNav, type NavHistory } from './lib/navHistory'
 import { isStringArray, readJsonPref, readPref, writePref } from './lib/prefs'
-import { DEFAULT_OPEN, RECENT_MAX } from './lib/agentsTree'
 import type { ErrorInfo } from './lib/diagnostics'
 
 /**
- * Where the window is and how it is laid out (IA § 2): the page, the open session, back and forward, whether Details and the
- * Agents panel are open, and the one crash banner. A slice of the UI store; store.ts re-exports the types.
+ * Where the window is and how it is laid out (IA § 2): the page, the open session, back and forward, whether Details is open,
+ * and the one crash banner. A slice of the UI store; store.ts re-exports the types.
  */
 
 export type Page = 'new' | 'session' | 'overview' | 'tasks' | 'sessions' | 'approvals' | 'files' | 'activity' | 'report' | 'roles' | 'settings'
@@ -39,10 +38,9 @@ export function normalizeNav(input: NavInput): Nav {
 const sameNav = (a: Nav, b: Nav): boolean => JSON.stringify(a) === JSON.stringify(b)
 
 const DETAILS_KEY = 'agentdeck.detailsOpen'
-const AGENTS_KEY = 'agentdeck.agentsOpen'
-const GROUP_KEY = 'agentdeck.groupByProject'
 const ROLES_KEY = 'agentdeck.recentRoles'
-const SECTIONS_KEY = 'agentdeck.agentSections'
+/** Agents remembered for the composer's @ menu. */
+const RECENT_MAX = 5
 
 /** With no choice made, Details opens on a window wide enough to give it a third column. */
 export const DETAILS_AUTO_MIN_WIDTH = 1440
@@ -81,16 +79,6 @@ export interface ShellSlice {
   /** null = no choice yet: open when the window is wide (detailsOpenAt). */
   detailsPref: boolean | null
   setDetails(open: boolean): void
-  agentsOpen: boolean
-  setAgentsOpen(open: boolean): void
-  groupByProject: boolean
-  setGroupByProject(on: boolean): void
-  /** The Agents panel's open groups (Favourites and Leadership until a person changes them). */
-  agentSections: string[]
-  toggleAgentSection(id: string): void
-  /** Bumped to put the cursor in the Agents filter (Ctrl+Shift+A). */
-  agentsFocusTick: number
-  focusAgentsFilter(): void
   /** Agents you started a session as lately, newest first. */
   recentRoles: string[]
   rememberRole(id: string): void
@@ -131,25 +119,6 @@ export function createShellSlice(set: Set, get: () => ShellSlice): ShellSlice {
       writeFlag(DETAILS_KEY, open)
       set({ detailsPref: open })
     },
-    agentsOpen: readFlag(AGENTS_KEY) ?? true,
-    setAgentsOpen: (open) => {
-      writeFlag(AGENTS_KEY, open)
-      set({ agentsOpen: open })
-    },
-    groupByProject: readFlag(GROUP_KEY) ?? false,
-    setGroupByProject: (on) => {
-      writeFlag(GROUP_KEY, on)
-      set({ groupByProject: on })
-    },
-    agentSections: readJsonPref(SECTIONS_KEY, isStringArray, [...DEFAULT_OPEN]),
-    toggleAgentSection: (id) => {
-      const now = get().agentSections
-      const agentSections = now.includes(id) ? now.filter((x) => x !== id) : [...now, id]
-      writePref(SECTIONS_KEY, JSON.stringify(agentSections))
-      set({ agentSections })
-    },
-    agentsFocusTick: 0,
-    focusAgentsFilter: () => set((s) => ({ agentsOpen: true, agentsFocusTick: s.agentsFocusTick + 1 })),
     recentRoles: readJsonPref(ROLES_KEY, isStringArray, []).slice(0, RECENT_MAX),
     rememberRole: (id) => {
       const recentRoles = [id, ...get().recentRoles.filter((r) => r !== id)].slice(0, RECENT_MAX)

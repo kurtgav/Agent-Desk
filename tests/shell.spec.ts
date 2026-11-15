@@ -258,9 +258,9 @@ test('no page offers a control that promises a later milestone (D-033 retired)',
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
   await none()
-  // Live with no usage setting on (usage-from-logs): the Usage line says token counts are off and offers the one real way to show
-  // them, a button that opens Settings > Claude Code, not a control that does nothing.
-  await expect(page.getByText('Token counts are off. One setting shows them now, with no new session.')).toBeVisible()
+  // Live with no usage setting on (usage-from-logs): the Usage line shows agent time and offers the one real way to show token
+  // counts, a button that opens Settings > Claude Code, not a control that does nothing.
+  await expect(page.getByText('agent time this week')).toBeVisible()
   await page.getByRole('button', { name: 'Show token usage' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 2, name: 'Claude Code' })).toBeVisible()

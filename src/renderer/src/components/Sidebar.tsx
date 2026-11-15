@@ -1,7 +1,6 @@
 import { Plus, Search } from 'lucide-react'
 import { useUi } from '@/store'
 import { CollapsedRail, TOGGLE_ID } from './shell/CollapsedRail'
-import { AgentsPanel } from './shell/AgentsPanel'
 import { SidebarNeeds } from './shell/SidebarNeeds'
 import { SidebarSessions } from './shell/SidebarSessions'
 import { WorkspaceRow } from './shell/WorkspaceRow'
@@ -17,9 +16,9 @@ function toggleAndKeepFocus(toggle: () => void): void {
 }
 
 /**
- * The same on every page (IA § 3), top to bottom: New session and Search; what needs you (only when something does); the sessions
- * AgentDeck knows, started here or watched; every agent, by team; the workspace pages as one row of icons; usage and you.
- * The two lists scroll on their own, so nothing below them is ever pushed out of the window.
+ * The same on every page (IA § 3), top to bottom: New session and Search; the workspace pages as one labelled list; what needs you
+ * (only when something does); your sessions; you, Settings and collapse. The two lists scroll on their own, so nothing below them is
+ * ever pushed out of the window. Agents is a page, not a tree in here.
  */
 export function Sidebar() {
   const collapsed = useUi((s) => s.sidebarCollapsed)
@@ -48,10 +47,9 @@ export function Sidebar() {
         </Hint>
       </div>
 
+      <WorkspaceRow />
       <SidebarNeeds />
       <SidebarSessions />
-      <AgentsPanel />
-      <WorkspaceRow />
       <SidebarFooter onCollapse={() => toggleAndKeepFocus(toggle)} />
     </aside>
   )

@@ -33,16 +33,16 @@ A **session** is any Claude Code conversation AgentDeck knows about. It has a na
 ┌ Sidebar 272 px ─────────┬ Main ───────────────────────────────────────────┬ Details 320 px (toggle) ┐
 │ New session   Ctrl+N    │  header: name · @role · folder · status · ⋯     │  Plan / tasks            │
 │ Search        Ctrl+K    │  ─────────────────────────────────────────────  │  Files changed           │
-│                         │  the open session (thread or timeline)          │  Activity                │
-│ Needs you (2)           │                                                 │  Usage of this session   │
-│ Pinned                  │                                                 │                          │
-│ Sessions  Today         │                                                 │                          │
-│   …       Yesterday     │  ─────────────────────────────────────────────  │                          │
-│ Agents  (all, by team)  │  composer: @ mention · / commands · chips       │                          │
+│ Tasks                   │  the open session (thread or timeline)          │  Activity                │
+│ Approvals               │                                                 │  Usage of this session   │
+│ Daily report · Agents   │                                                 │                          │
+│ Files · Activity · …    │                                                 │                          │
+│ Needs you (2)           │  ─────────────────────────────────────────────  │                          │
+│ Sessions  Pinned, Today │  composer: @ mention · / commands · chips       │                          │
+│   …       Yesterday     │                                                 │                          │
 │ ─────────────────────── │                                                 │                          │
-│ Tasks Report Approvals  │                                                 │                          │
-│ Files Activity Settings │                                                 │                          │
-│ Usage · profile         │                                                 │                          │
+│ Usage                   │                                                 │                          │
+│ profile · Settings · ⇤  │                                                 │                          │
 └─────────────────────────┴─────────────────────────────────────────────────┴──────────────────────────┘
 ```
 
@@ -52,12 +52,15 @@ A **session** is any Claude Code conversation AgentDeck knows about. It has a na
 
 ## 3. Sidebar, top to bottom
 
+Calm by rule (D-169): one line per row, 32 px rows, 16 px icons, 14 px labels, grey sentence-case group labels, the current page as a grey pill, a count only where something waits for you.
+
 1. **New session** (primary button, Ctrl+N) and **Search** (Ctrl+K). New session opens the *new session screen* (section 5).
-2. **Needs you**: only when something waits. One row per item (what it asks, session, age) with the same actions as today, so nothing urgent hides below a fold. Approvals count lives here and on the Approvals page.
-3. **Pinned**, then **Sessions** grouped by **Today / Yesterday / This week / Earlier**, with a toggle to group by project. Newest activity first within a group. Archived are hidden unless filtered. Row anatomy: mascot avatar, name (the local alias if renamed), role emoji, status (working spinner, needs-you amber dot, failed red dot, idle grey), unread dot, relative time. Right-click or the row's ⋯ opens the session menu. A long list scrolls under a fade; the list is virtualised past about 200 rows.
-4. **Agents**: *all* agents, always reachable. A collapsible panel: *Favourites* (pinned and recently used) first, then **Leadership** (CTO, Founding Engineer, ...), then every division with its count (Engineering 66, Marketing 37, ...). A filter box at the top of the panel filters the whole tree. Each agent row shows emoji, name and the vibe on hover or focus. Click = new session as that agent. Drag or `@` = mention. The full catalog page (cards, detail, create/edit a role) is one click away ("See all agents").
-5. **Workspace** (compact icon rail with labels on hover and at wide widths): Tasks, Daily report, Approvals (count), Files, Activity, Overview, Settings. At most one row of icons; no nested groups.
-6. **Footer**: usage card (honest states), profile, collapse button.
+2. **Workspace**: a labelled list, icon and word on every row: Tasks, Approvals, Daily report, Agents, Files, Activity, Overview. Settings sits in the footer.
+3. **Needs you**: only when something waits, with its count. One line per item (kind icon in its colour, what it asks, age), the most urgent first. Click a line to see the session and answer it in place; a toast you click opens its line. A session waiting with no item is one line that goes to its window. The list scrolls in a short region and gives way first in a short window.
+4. **Sessions**: **Pinned**, then **Today / Yesterday / This week / Earlier**, newest activity first. Archived are hidden. Row anatomy: status mark, name (the local alias if renamed), relative time; unread is a bolder name; folder and "started elsewhere" are in the tooltip. Right-click or the row's ⋯ opens the session menu. The Sessions page ("All sessions") has the filters, the project filter and the archive; grouping by project is gone (D-169). The list is virtualised past about 200 rows.
+5. **Footer**: one usage line (honest states) with today's figures under it when the window is tall enough, the 5-hour window in its tooltip and in Settings; profile, Settings, collapse.
+
+Agents are a page (the catalog, with the division rail and the filter), not a tree in the sidebar: there the tree was the noisiest thing on screen. `@` in any composer still reaches every agent in one keystroke.
 
 Collapsed (64 px): icons only, tooltips, the same order.
 
@@ -70,7 +73,7 @@ Collapsed (64 px): icons only, tooltips, the same order.
 
 ## 5. New session screen (the landing page)
 
-What opens on launch and on Ctrl+N, instead of the old dashboard: one centred **composer**, below it *Suggested agents* (from the text as you type, no model), then *Needs you* if anything waits, then *Recent sessions*. The old Home KPIs and "Your agents" tiles move to the **Overview** page (kept, one click away in Workspace).
+What opens on launch and on Ctrl+N, instead of the old dashboard: one **composer** across the width (up to about 1040 px), below it *Suggested agents* (from the text as you type, no model), then *Needs you* if anything waits, then *Recent sessions* beside *Ways to begin* (one row of three when there are no sessions yet). The old Home KPIs and "Your agents" tiles move to the **Overview** page (kept, one click away in Workspace).
 
 ## 6. The composer (one component, used everywhere)
 
@@ -101,12 +104,12 @@ Unchanged in behaviour: Approvals, Files, Activity, Daily report, Tasks, Setting
 
 ## 8. Keyboard
 
-Ctrl+N new session · Ctrl+K search and jump (sessions, agents, pages, files) · Ctrl+Shift+A focus the Agents filter · Ctrl+1..9 jump to the nth session in the sidebar · Ctrl+B toggle sidebar · Ctrl+Alt+D toggle Details · `@` mention · `/` commands · Esc stop or close · context menu key or Shift+F10 on a row.
+Ctrl+N new session · Ctrl+K search and jump (sessions, agents, pages, files) · Ctrl+Shift+A open Agents · Ctrl+1..9 jump to the nth session in the sidebar · Ctrl+B toggle sidebar · Ctrl+Alt+D toggle Details · `@` mention · `/` commands · Esc stop or close · context menu key or Shift+F10 on a row.
 
 ## 9. Acceptance
 
 1. A new user sees where to start in one second: one composer, one list.
-2. Typing `@c` shows CTO first; `@qa` finds QA agents; every one of the ~350 agents is reachable from the Agents panel and from `@`.
+2. Typing `@c` shows CTO first; `@qa` finds QA agents; every one of the ~350 agents is reachable from the Agents page and from `@`.
 3. No page needs the sidebar to change; no feature loses a way in (Approvals, Files, Activity, Report, Tasks, Settings all stay reachable in two clicks or Ctrl+K).
 4. Needs-you items are visible on every screen without scrolling the main pane.
 5. Light and dark, 1200 × 760 and 1440 × 924, keyboard-only, axe clean, reduced motion.

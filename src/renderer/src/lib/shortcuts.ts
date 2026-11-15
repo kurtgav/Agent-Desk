@@ -2,14 +2,14 @@
  * The window's keyboard shortcuts (IA § 8) as a pure map from a key event to an action, so the table is testable and the one
  * listener in the frame only runs what this returns.
  *
- *   Ctrl+N new session · Ctrl+K search · Ctrl+Shift+A agents filter · Ctrl+1..9 nth session · Ctrl+B sidebar ·
+ *   Ctrl+N new session · Ctrl+K search · Ctrl+Shift+A Agents · Ctrl+1..9 nth session · Ctrl+B sidebar ·
  *   Ctrl+Alt+D details · Alt+Left / Alt+Right back / forward
  */
 
 export type ShortcutAction =
   | { kind: 'new' }
   | { kind: 'palette' }
-  | { kind: 'agents-filter' }
+  | { kind: 'agents' }
   | { kind: 'nth'; n: number }
   | { kind: 'sidebar' }
   | { kind: 'details' }
@@ -35,7 +35,7 @@ export function shortcutFor(e: KeyLike): ShortcutAction | null {
   }
   if (!mod) return null
   if (e.altKey) return !e.shiftKey && (key === 'd' || e.code === 'KeyD') ? { kind: 'details' } : null
-  if (e.shiftKey) return key === 'a' ? { kind: 'agents-filter' } : null
+  if (e.shiftKey) return key === 'a' ? { kind: 'agents' } : null
   if (key === 'n') return { kind: 'new' }
   if (key === 'k') return { kind: 'palette' }
   if (key === 'b') return { kind: 'sidebar' }

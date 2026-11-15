@@ -1,7 +1,6 @@
 import type { ConsoleState } from '@shared/console'
 import type { SessionMetaState } from '@shared/session-meta'
 import type { Session, Status } from '@shared/snapshot'
-import { pathKey } from '@shared/paths'
 import { projectName } from './selectors'
 import { isArchived, isPinned, isUnread, nameOf, noteOf, shownIn } from './sessionMeta'
 
@@ -147,23 +146,10 @@ export interface SidebarList {
   sections: SessionSection[]
 }
 
-export type GroupBy = 'time' | 'project'
-
-/** Pinned first (newest activity first), then the rest by time bucket or by project. Empty sections are left out. */
-export function buildList(entries: readonly SessionEntry[], now: number, by: GroupBy): SidebarList {
+/** Pinned first (newest activity first), then the rest by time bucket. Empty sections are left out. */
+export function buildList(entries: readonly SessionEntry[], now: number): SidebarList {
   const pinned = entries.filter((e) => e.pinned).sort((a, b) => b.at - a.at)
   const rest = entries.filter((e) => !e.pinned).sort((a, b) => b.at - a.at)
-  if (by === 'project') {
-    const groups = new Map<string, SessionSection>()
-    for (const e of rest) {
-      const key = e.session.cwd ? pathKey(e.session.cwd) : ''
-      const g = groups.get(key) ?? { key: `project:${key}`, title: e.project || 'No folder', entries: [] }
-      g.entries.push(e)
-      groups.set(key, g)
-    }
-    // Insertion order is newest activity first, because `rest` is sorted.
-    return { pinned, sections: [...groups.values()] }
-  }
   const sections = BUCKETS.map((b): SessionSection => ({ key: `time:${b}`, title: BUCKET_TITLE[b], entries: rest.filter((e) => timeBucket(e.at, now) === b) }))
   return { pinned, sections: sections.filter((s) => s.entries.length > 0) }
 }
@@ -172,7 +158,7 @@ export function buildList(entries: readonly SessionEntry[], now: number, by: Gro
 export const displayOrder = (list: SidebarList): SessionEntry[] => [...list.pinned, ...list.sections.flatMap((s) => s.entries)]
 
 /** The sessions in the order the sidebar shows them: what Ctrl+1..9 counts, and what a search jumps through. */
-export const sidebarOrder = (entries: readonly SessionEntry[], meta: SessionMetaState, now: number, by: GroupBy): SessionEntry[] => displayOrder(buildList(listable(entries, meta), now, by))
+export const sidebarOrder = (entries: readonly SessionEntry[], meta: SessionMetaState, now: number): SessionEntry[] => displayOrder(buildList(listable(entries, meta), now))
 
 /** The relative time a row shows: "now", "5m", "3h", "Tue", "Nov 4". */
 export function shortAgo(at: number, now: number): string {

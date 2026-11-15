@@ -1,4 +1,4 @@
-import { PanelLeft, Plus, Search, ShieldAlert, Users } from 'lucide-react'
+import { PanelLeft, Plus, Search, ShieldAlert } from 'lucide-react'
 import { useUi } from '@/store'
 import { findEntry, listable } from '@/lib/sessionList'
 import { needsOkCount } from '@/lib/selectors'
@@ -15,8 +15,8 @@ const RAIL_SESSIONS_MAX = 30
 export const TOGGLE_ID = 'sidebar-toggle'
 
 /**
- * The sidebar at 64 px: the same order, as icons with tooltips. New session, Search, what needs you, the sessions as faces, the
- * agents, the workspace row stacked, and you. Expanding is one click on the first icon.
+ * The sidebar at 64 px: the same order, as icons with tooltips. New session, Search, the pages, what needs you, the sessions as
+ * faces, then Settings and you. Expanding is one click on the first icon.
  */
 export function CollapsedRail({ onExpand }: { onExpand(): void }) {
   const entries = useEntries()
@@ -28,11 +28,6 @@ export function CollapsedRail({ onExpand }: { onExpand(): void }) {
   const profile = useUi((s) => s.profile)
   const sessions = listable(entries, meta).slice(0, RAIL_SESSIONS_MAX)
   const open = nav.page === 'session' ? findEntry(entries, nav.session)?.key : undefined
-  const agents = (): void => {
-    const ui = useUi.getState()
-    ui.focusAgentsFilter()
-    onExpand()
-  }
 
   return (
     <aside id="sidebar" aria-label="Sidebar" className="flex h-full w-16 flex-none flex-col items-center bg-ground">
@@ -58,6 +53,12 @@ export function CollapsedRail({ onExpand }: { onExpand(): void }) {
             <Search size={16} strokeWidth={1.75} />
           </IconButton>
         </Hint>
+      </div>
+
+      <div className="mt-2 flex flex-none flex-col items-center gap-0.5 border-t border-line pt-2">
+        {WORKSPACE.filter((w) => w.page !== 'settings').map((w) => (
+          <WorkspaceButton key={w.page} {...w} side="right" />
+        ))}
         {waiting > 0 && (
           <Hint side="right" label={`${waiting} need you. Open the sidebar to answer.`}>
             <IconButton aria-label={`${waiting} need you`} className="relative text-[var(--needs-ink)]" onClick={onExpand}>
@@ -92,17 +93,10 @@ export function CollapsedRail({ onExpand }: { onExpand(): void }) {
         ))}
       </ul>
 
-      <div className="flex flex-none flex-col items-center gap-0.5 border-t border-line py-2">
-        <Hint side="right" label="Agents">
-          <IconButton aria-label="Agents" className="size-9" onClick={agents}>
-            <Users size={17} strokeWidth={1.75} />
-          </IconButton>
-        </Hint>
-        {WORKSPACE.map((w) => (
+      <div className="flex flex-none flex-col items-center gap-1 border-t border-line pb-3 pt-2">
+        {WORKSPACE.filter((w) => w.page === 'settings').map((w) => (
           <WorkspaceButton key={w.page} {...w} side="right" />
         ))}
-      </div>
-      <div className="flex flex-none justify-center pb-3">
         <Hint side="right" label={`${profile.name}. Open settings`}>
           <button type="button" aria-label={`${profile.name}. Open settings`} onClick={() => useUi.getState().go({ page: 'settings' })} className="press rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <UserAvatar size={28} />

@@ -11,15 +11,15 @@ import { ComposerSlot } from './ComposerSlot'
 import { StatusMark } from './StatusMark'
 import { useEntries } from './useEntries'
 import { useRoleIndex } from './useRoleIndex'
-import { Skeleton } from '../ui'
+import { Skeleton, cn } from '../ui'
 
 const RECENT_SHOWN = 5
 const ICON: LucideIcon[] = [Compass, FlaskConical, GitCompare]
 
-/** Three ways to begin for someone with no sessions yet: they fill the box, nothing is sent. */
-function Starters() {
+/** Three ways to begin: they fill the box, nothing is sent. Side by side when they have the width, stacked beside Recent sessions. */
+function Starters({ beside }: { beside: boolean }) {
   return (
-    <ul className="mt-2 grid gap-2" aria-label="Ways to begin">
+    <ul className={cn('mt-2 grid gap-2', beside ? 'sm:max-[1180px]:grid-cols-3' : 'sm:grid-cols-3')} aria-label="Ways to begin">
       {STARTERS.map((s, i) => {
         const I = ICON[i]!
         return (
@@ -77,9 +77,10 @@ function Recent({ entries, now }: { entries: SessionEntry[]; now: number }) {
 }
 
 /**
- * The new session screen, what opens on launch and on Ctrl+N (IA § 5): one composer, then the agents suggested from what you type,
- * then whether anything needs you, then the sessions you were last in. The Needs-you list itself lives in the sidebar, so it is not
- * drawn twice; this screen says "Everything is calm" when nothing waits, and points at the sidebar when something does.
+ * The new session screen, what opens on launch and on Ctrl+N (IA § 5): one composer across the width, then whether anything needs
+ * you, then the sessions you were last in beside three ways to begin (one row of three when there are no sessions yet). The Needs-you
+ * list itself lives in the sidebar, so it is not drawn twice; this screen says "Everything is calm" when nothing waits, and points at
+ * the sidebar when something does.
  */
 export function NewSession() {
   const name = useUi((s) => s.profile.name)
@@ -90,18 +91,19 @@ export function NewSession() {
   const meta = useUi((s) => s.sessionMeta)
   const entries = useEntries()
   const recent = listable(entries, meta).slice(0, RECENT_SHOWN)
+  const loading = link === 'connecting' && recent.length === 0
 
   return (
-    <div className="mx-auto flex w-full max-w-[720px] flex-col px-8 pb-10 pt-[clamp(32px,9vh,96px)]">
+    <div className="mx-auto flex w-full max-w-[1120px] flex-col px-10 pb-10 pt-[clamp(32px,8vh,88px)]">
       <h1 className="t-display text-balance [overflow-wrap:anywhere]">{greeting(new Date(now).getHours(), name)}</h1>
-      <p className="mt-1.5 text-pretty text-[15px] leading-6 text-muted">What should Claude work on? Describe it below. Pick an agent from the sidebar, or type @ to mention one.</p>
+      <p className="mt-1.5 text-pretty text-[15px] leading-6 text-muted">What should Claude work on? Describe it below, and type @ to bring in an agent.</p>
 
       {/* The composer is its own card here (with its suggested agents under it, and Advanced inside it). */}
       <div className="mt-6">
         <ComposerSlot variant="new" />
       </div>
 
-      <div className="mt-8">
+      <div className="mt-6">
         {waiting > 0 ? (
           collapsed ? (
             <NeedsYou />
@@ -121,21 +123,36 @@ export function NewSession() {
         )}
       </div>
 
-      <section aria-labelledby="recent-sessions" className="mt-6">
-        <h2 id="recent-sessions" className="text-[12px] font-medium text-muted">
-          Recent sessions
-        </h2>
-        {link === 'connecting' && recent.length === 0 ? (
-          <div role="status" aria-label="Loading sessions" className="mt-2 flex flex-col gap-2">
-            <Skeleton className="h-11" />
-            <Skeleton className="h-11" />
-          </div>
-        ) : recent.length ? (
-          <Recent entries={recent} now={now} />
-        ) : (
-          <Starters />
-        )}
-      </section>
+      {loading || recent.length ? (
+        <div className="mt-6 grid gap-x-10 gap-y-8 min-[1180px]:grid-cols-[minmax(0,1fr)_300px]">
+          <section aria-labelledby="recent-sessions">
+            <h2 id="recent-sessions" className="text-[12px] font-medium text-muted">
+              Recent sessions
+            </h2>
+            {loading ? (
+              <div role="status" aria-label="Loading sessions" className="mt-2 flex flex-col gap-2">
+                <Skeleton className="h-11" />
+                <Skeleton className="h-11" />
+              </div>
+            ) : (
+              <Recent entries={recent} now={now} />
+            )}
+          </section>
+          <section aria-labelledby="ways-to-begin">
+            <h2 id="ways-to-begin" className="text-[12px] font-medium text-muted">
+              Ways to begin
+            </h2>
+            <Starters beside />
+          </section>
+        </div>
+      ) : (
+        <section aria-labelledby="ways-to-begin" className="mt-6">
+          <h2 id="ways-to-begin" className="text-[12px] font-medium text-muted">
+            Ways to begin
+          </h2>
+          <Starters beside={false} />
+        </section>
+      )}
     </div>
   )
 }

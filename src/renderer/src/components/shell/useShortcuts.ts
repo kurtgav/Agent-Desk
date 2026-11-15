@@ -21,11 +21,10 @@ function run(action: ShortcutAction): void {
       return newSession()
     case 'palette':
       return ui.setPalette(!ui.palette)
-    case 'agents-filter':
-      if (ui.sidebarCollapsed) ui.toggleSidebar()
-      return ui.focusAgentsFilter()
+    case 'agents':
+      return ui.go({ page: 'roles' })
     case 'nth': {
-      const order = sidebarOrder(currentEntries(), ui.sessionMeta, ui.now, ui.groupByProject ? 'project' : 'time')
+      const order = sidebarOrder(currentEntries(), ui.sessionMeta, ui.now)
       const target = order[action.n - 1]
       return target ? ui.openSession(target.key) : undefined
     }
